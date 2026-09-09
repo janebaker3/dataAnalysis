@@ -29,6 +29,12 @@ allActualVals = NaN(nConditions, length(participantIDs), 2);
 % Dimensions: [Condition x Participant] - simple overall accuracy per block
 allOverallAcc = NaN(nConditions, length(participantIDs));
 
+% Diagnostic log to flag suspicious/non-converged logistic fits
+% Will be converted to a table at the end for easy sorting/inspection
+diagLog = struct('participant', {}, 'condIdx', {}, 'stdVal', {}, 'hVal', {}, ...
+    'nTrials', {}, 'nSwitches', {}, 'beta1', {}, 'lowerAsy', {}, 'upperAsy', {}, ...
+    'effAcc', {}, 'flagReason', {});
+
 %% --- Individual Participant Loop ---
 % Iterate over each specified participant to extract data and fit logistic models
 for p = 1:length(participantIDs)
@@ -110,7 +116,46 @@ for p = 1:length(participantIDs)
             beta1 = fits(2);          % Slope coefficient
             lowerAsy = fits(end-1);   % Lower asymptote (chance level)
             upperAsy = 1 - fits(end); % Upper asymptote (maximum accuracy achieved)
-            
+
+            % --- Diagnostic Checks: Flag suspicious/non-converged fits ---
+            % Count actual number of source switches in this block (used to
+            % assess whether there was enough data to constrain the fit)
+            nSwitches = sum(diff(thisBlockSource) ~= 0) + 1;
+
+            flagReasons = {};
+            if nTrials < 30
+                flagReasons{end+1} = 'low nTrials';
+            end
+            if nSwitches < 5
+                flagReasons{end+1} = 'low nSwitches';
+            end
+            if abs(beta1) < 1e-6
+                flagReasons{end+1} = 'near-zero slope';
+            end
+            if lowerAsy < 1e-6
+                flagReasons{end+1} = 'lowerAsy == 0';
+            end
+            if upperAsy > 0.999
+                flagReasons{end+1} = 'upperAsy == 1';
+            end
+            % Flag suspicious "boundary" values seen repeatedly (e.g., 0.8),
+            % which suggest the optimizer returned a default/init value
+            % rather than a genuine converged fit
+            if abs(lowerAsy - 0.8) < 1e-6 || abs(upperAsy - 0.8) < 1e-6
+                flagReasons{end+1} = 'suspected boundary value (0.8)';
+            end
+
+            if ~isempty(flagReasons)
+                reasonStr = strjoin(flagReasons, '; ');
+                fprintf('FLAG: P%s Std %.0f H %.3f (nTrials=%d, nSwitches=%d, beta1=%.4f, lowerAsy=%.3f, upperAsy=%.3f) -- %s\n', ...
+                    pidStr, stdVal, hVal, nTrials, nSwitches, beta1, lowerAsy, upperAsy, reasonStr);
+
+                diagLog(end+1) = struct('participant', pidStr, 'condIdx', condIdx, ...
+                    'stdVal', stdVal, 'hVal', hVal, 'nTrials', nTrials, 'nSwitches', nSwitches, ...
+                    'beta1', beta1, 'lowerAsy', lowerAsy, 'upperAsy', upperAsy, ...
+                    'effAcc', NaN, 'flagReason', reasonStr); %#ok<SAGROW>
+            end
+
             % General rule: if the fitted slope is negative, accuracy is decreasing
             % over time since switch (inverted relationship), so the effective
             % "ceiling" accuracy is actually the lower asymptote in that case.
@@ -119,7 +164,12 @@ for p = 1:length(participantIDs)
             else
                 effAcc = upperAsy;
             end
-            
+
+            % Backfill effAcc into the most recent diagnostic log entry, if one was just added
+            if ~isempty(diagLog) && diagLog(end).condIdx == condIdx && strcmp(diagLog(end).participant, pidStr)
+                diagLog(end).effAcc = effAcc;
+            end
+
             % Store extracted parameters for Group Calculation
             allParams(condIdx, p, 1) = beta0;
             allParams(condIdx, p, 2) = beta1;
@@ -190,6 +240,19 @@ for p = 1:length(participantIDs)
             fprintf('Fit failed for P%s Std %.3f H %.3f: %s\n', pidStr, stdVal, hVal, ME.message);
         end
     end
+end
+
+%% --- Summarize Diagnostic Flags ---
+if ~isempty(diagLog)
+    diagTable = struct2table(diagLog);
+    fprintf('\n=== %d suspicious fit(s) flagged out of %d total fits ===\n', ...
+        height(diagTable), nConditions * length(participantIDs));
+    disp(diagTable);
+    
+    % Optional: save to CSV for easier review/sorting outside MATLAB
+    % writetable(diagTable, fullfile(figurePath, 'fit_diagnostics.csv'));
+else
+    fprintf('\n=== No suspicious fits flagged ===\n');
 end
 
 %% --- Generate Group Average Figures ---

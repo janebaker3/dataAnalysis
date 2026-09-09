@@ -1,6 +1,6 @@
 %% --- Environment Setup ---
 % Define the participants to include in the analysis
-participantIDs = 6:13;%[6 7]; % Adjust as needed
+participantIDs = [001, 002, 003, 004, 005, 006, 007, 008, 009, 010];
 
 % Define paths for saving figures and locating necessary analysis toolboxes
 figurePath = '/Users/janebaker/Desktop/triangles/taskData/figures';
@@ -23,7 +23,7 @@ for p = 1:length(participantIDs)
     pid = participantIDs(p);
     
     % Load behavioral data for the current participant
-    load(['/Users/janebaker/Desktop/triangles/taskData/real data/p' num2str(pid) '.mat']);
+    load(['/Users/janebaker/Desktop/triangles/taskData/finalData/p' num2str(pid) '.mat']);
     
     % Extract unique block numbers and map them for filtering
     blocks = unique([data.blockNumber]);
@@ -35,6 +35,8 @@ for p = 1:length(participantIDs)
         thisBlockTask = data(blockNum == blocks(b));
         thisBlockSource = [thisBlockTask.sourceIsLeft];
         thisBlockBelief = [thisBlockTask.keyPressed];
+        stdIdx = thisBlockTask(1).stdHrzIdx;
+        hIdx = thisBlockTask(1).hazardIdx;
         
         nTrials = length(thisBlockTask);
         
@@ -129,17 +131,6 @@ for p = 1:length(participantIDs)
             
             % Y-value at the inflection point
             yMid = (lowerAsy + upperAsy) / 2;
-
-            % Plot the effective asymptote line and its label
-            if pid == 10 && b == 3
-                yline(lowerAsy, '--k', 'LineWidth', 2);
-                text(28, lowerAsy + 0.04, sprintf('Asy: %.2f', lowerAsy), ...
-                    'FontWeight', 'bold', 'FontSize', 18, 'HorizontalAlignment', 'right');
-            else
-                yline(upperAsy, '--k', 'LineWidth', 2);
-                text(28, upperAsy + 0.04, sprintf('Asy: %.2f', upperAsy), ...
-                    'FontWeight', 'bold', 'FontSize', 18, 'HorizontalAlignment', 'right');
-            end
             
             % Plot the tangent line representing the maximum slope at the midpoint
             if midpointSeconds > 0 && midpointSeconds < 30
@@ -160,14 +151,14 @@ for p = 1:length(participantIDs)
             
             xlabel('Seconds Since Source Switch', 'FontSize', 24, 'FontWeight', 'bold');
             ylabel('Accuracy', 'FontSize', 24, 'FontWeight', 'bold');
-            title(sprintf('P%d Block %d: Logistic Fit', pid, b), 'FontSize', 30);
+            title(sprintf('P%d Std %d H %d: Logistic Fit', pid, stdIdx, hIdx), 'FontSize', 30);
             
             % Uncomment to save individual plots
             %saveas(f, fullfile(figurePath, sprintf('p%d_b%d_logistic_fit.png', pid, b)));
             close(f);
         catch ME
             % Error handling to prevent one bad fit from stopping the entire script
-            fprintf('Fit failed for P%d Block %d: %s\n', pid, b, ME.message);
+            fprintf('Fit failed for P %d Std %d H %d: Logistic Fit', pid, stdIdx, hIdx, ME.message);
         end
     end
 end

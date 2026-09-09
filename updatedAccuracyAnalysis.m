@@ -23,9 +23,11 @@ maxFramesPossible = 2000;
 % Dimensions: [Condition x Participant x FrameIndex]
 allRawAcc = NaN(nConditions, length(participantIDs), maxFramesPossible);
 
-% NEW: Store actual std/hazard values (not just indices) for labeling plots later
 % Dimensions: [Condition x Participant x (stdVal, hazardVal)]
 allActualVals = NaN(nConditions, length(participantIDs), 2);
+
+% Dimensions: [Condition x Participant] - simple overall accuracy per block
+allOverallAcc = NaN(nConditions, length(participantIDs));
 
 %% --- Individual Participant Loop ---
 % Iterate over each specified participant to extract data and fit logistic models
@@ -66,7 +68,7 @@ for p = 1:length(participantIDs)
         % Preallocate arrays to track time since switch and trial accuracy
         trialFramesSince = zeros(nTrials, 1);
         trialIsCorrect = zeros(nTrials, 1);
-        
+
         % Calculate raw accuracy and track how long it has been since the source changed
         countSince = 0;
         for t = 1:nTrials
@@ -87,6 +89,8 @@ for p = 1:length(participantIDs)
                 trialIsCorrect(t) = 0;
             end
         end
+
+        allOverallAcc(condIdx, p) = mean(trialIsCorrect);
         
         % Calculate and store the mean raw accuracy for every frame interval
         maxX = max(trialFramesSince);
@@ -280,86 +284,94 @@ end
 close all
 
 %% --- Individual Participant Accuracy Comparison (Outlier Check) ---
-% Visualize each participant's effective accuracy across all std/hazard
-% conditions to help identify any outlier participants or conditions.
+% Compare raw overall accuracy (model-free, robust) against logistic
+% effAcc (captures detection-speed-independent ceiling performance) to
+% distinguish genuine behavioral outliers from fitting artifacts.
 
-% Extract effective accuracy for all participants and conditions
-% Rows = conditions, Columns = participants
-accMatrix = squeeze(allParams(:, :, 5)); % [nConditions x nParticipants]
+accMatrixFit = squeeze(allParams(:, :, 5));  % [nConditions x nParticipants] - logistic effAcc
+accMatrixRaw = allOverallAcc;                 % [nConditions x nParticipants] - raw overall accuracy
 
-% Build condition labels using the actual std/hazard values (averaged
-% across participants, should be consistent within a condition)
+% Build condition labels using the actual std/hazard values.
+% NOTE: Using a single-line label (no embedded \n) to avoid a MATLAB
+% tick-rendering issue where multi-line labels for 6 closely-spaced ticks
+% were being torn apart and displayed as if std/hazard were separate,
+% unpaired entries.
 condLabels = strings(nConditions, 1);
 for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
-    condLabels(condIdx) = sprintf('Std %.3f\nH %.3f', avgStdVal, avgHVal);
+    
+    % Sanity check: confirm this condition's std/hazard values are
+    % consistent across all participants (i.e., condIdx reliably maps to
+    % the same real condition for everyone). Flag if not.
+    stdSpread = nanstd(allActualVals(condIdx, :, 1));
+    hSpread = nanstd(allActualVals(condIdx, :, 2));
+    if stdSpread > 1e-6 || hSpread > 1e-6
+        fprintf('WARNING: condIdx %d has inconsistent std/hazard values across participants (stdSpread=%.4f, hSpread=%.4f)\n', ...
+            condIdx, stdSpread, hSpread);
+    end
+    
+    condLabels(condIdx) = sprintf('Std %.0f, H %.3f', avgStdVal, avgHVal);
 end
 condLabelsCell = cellstr(condLabels);
 
-% Build legend labels for each participant (P001, P002, ...)
 legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
-
-%% --- Option 1: Grouped Bar Chart (one group per condition, one bar per participant) ---
-f = figure;
-bh = bar(accMatrix, 'grouped');
-
-% Assign distinct colors per participant for easy tracking across conditions
 cmap = lines(length(participantIDs));
-for i = 1:length(bh)
-    bh(i).FaceColor = cmap(i, :);
-end
 
+%% --- Grouped Bar Charts: Raw vs Fit-based Accuracy, side by side ---
+f = figure('Position', [100 100 1600 700]);
+
+subplot(1,2,1);
+bh1 = bar(accMatrixRaw, 'grouped');
+for i = 1:length(bh1), bh1(i).FaceColor = cmap(i,:); end
 hold on;
+plot(1:nConditions, nanmean(accMatrixRaw,2), 'ko', 'MarkerFaceColor','k','MarkerSize',10,'LineWidth',2);
+ax = gca; ax.FontSize = 14; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 30;
+ylim([0 1]); grid on;
+ylabel('Raw Overall Accuracy', 'FontSize', 18, 'FontWeight', 'bold');
+xlabel('Condition (Std / Hazard)', 'FontSize', 18, 'FontWeight', 'bold');
+title('Raw Accuracy (model-free)', 'FontSize', 20);
 
-% Overlay the group mean per condition as a black marker for quick reference
-groupMeans = nanmean(accMatrix, 2);
-meanHandle = plot(1:nConditions, groupMeans, 'ko', 'MarkerFaceColor', 'k', ...
-    'MarkerSize', 10, 'LineWidth', 2);
+subplot(1,2,2);
+bh2 = bar(accMatrixFit, 'grouped');
+for i = 1:length(bh2), bh2(i).FaceColor = cmap(i,:); end
+hold on;
+plot(1:nConditions, nanmean(accMatrixFit,2), 'ko', 'MarkerFaceColor','k','MarkerSize',10,'LineWidth',2);
+ax = gca; ax.FontSize = 14; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 30;
+ylim([0 1]); grid on;
+ylabel('Effective Accuracy (logistic asymptote)', 'FontSize', 18, 'FontWeight', 'bold');
+xlabel('Condition (Std / Hazard)', 'FontSize', 18, 'FontWeight', 'bold');
+title('Logistic Fit Asymptote', 'FontSize', 20);
 
-% --- Formatting ---
-ax = gca;
-ax.FontSize = 16;
-ax.LineWidth = 2;
-ax.XTick = 1:nConditions;
-ax.XTickLabel = condLabelsCell;
-ax.XTickLabelRotation = 0;
-ylim([0 1]);
-ylabel('Effective Accuracy', 'FontSize', 20, 'FontWeight', 'bold');
-xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
-title('Individual Participant Accuracy by Condition', 'FontSize', 24);
-grid on;
-
-legend([bh, meanHandle], [legendLabels, {'Group Mean'}], ...
-    'Location', 'eastoutside', 'FontSize', 12);
-
-% Save figure (commented out by default)
-% saveas(f, fullfile(figurePath, 'individual_accuracy_by_condition_bar.png'));
-
-%% --- Option 2: Heatmap (Participant x Condition) ---
-% Often better for outlier detection: a participant row that's a
-% consistently different color stands out, and a condition column that's
-% uniformly off stands out separately.
-f2 = figure;
-imagesc(accMatrix'); % transpose so rows = participants, columns = conditions
-colormap(parula);
-cb = colorbar;
-cb.Label.String = 'Effective Accuracy';
-cb.Label.FontSize = 16;
-cb.Label.FontWeight = 'bold';
-clim([0 1]);
-
-ax = gca;
-ax.FontSize = 14;
-ax.XTick = 1:nConditions;
-ax.XTickLabel = condLabelsCell;
-ax.XTickLabelRotation = 0;
-ax.YTick = 1:length(participantIDs);
-ax.YTickLabel = legendLabels;
-
-xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
-ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
-title('Heatmap of Effective Accuracy: Participant x Condition', 'FontSize', 24);
+legend(bh2, legendLabels, 'Location', 'eastoutside', 'FontSize', 11);
 
 % Save figure (commented out by default)
-% saveas(f2, fullfile(figurePath, 'heatmap_accuracy_participant_by_condition.png'));
+% saveas(f, fullfile(figurePath, 'individual_accuracy_raw_vs_fit_comparison.png'));
+
+%% --- Heatmaps: Raw vs Fit-based Accuracy, side by side ---
+f2 = figure('Position', [100 100 1600 700]);
+
+subplot(1,2,1);
+imagesc(accMatrixRaw');
+colormap(parula); cb = colorbar; cb.Label.String = 'Raw Accuracy'; clim([0 1]);
+ax = gca; ax.FontSize = 12; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 30;
+ax.YTick = 1:length(participantIDs); ax.YTickLabel = legendLabels;
+xlabel('Condition', 'FontSize', 16, 'FontWeight', 'bold');
+ylabel('Participant', 'FontSize', 16, 'FontWeight', 'bold');
+title('Raw Overall Accuracy', 'FontSize', 20);
+
+subplot(1,2,2);
+imagesc(accMatrixFit');
+colormap(parula); cb = colorbar; cb.Label.String = 'Effective Accuracy'; clim([0 1]);
+ax = gca; ax.FontSize = 12; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 30;
+ax.YTick = 1:length(participantIDs); ax.YTickLabel = legendLabels;
+xlabel('Condition', 'FontSize', 16, 'FontWeight', 'bold');
+ylabel('Participant', 'FontSize', 16, 'FontWeight', 'bold');
+title('Logistic Fit Asymptote', 'FontSize', 20);
+
+% Save figure (commented out by default)
+% saveas(f2, fullfile(figurePath, 'heatmap_accuracy_raw_vs_fit_comparison.png'));

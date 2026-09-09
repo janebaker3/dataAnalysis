@@ -1,35 +1,47 @@
 %% --- Environment Setup ---
 % Define the participants to include in the analysis
-participantIDs = [001, 002, 003, 004, 005, 006, 007, 008, 009, 010];
+participantIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 % Define paths for saving figures and locating necessary analysis toolboxes
 figurePath = '/Users/janebaker/Desktop/triangles/taskData/figures';
 addpath(genpath('~/Desktop/triangles/analysis/eeglab2024.2.1/'))
 addpath(genpath('../../analysis/'))
 
+% Task design parameters (3 std levels x 2 hazard levels = 6 conditions)
+nStd = 3;
+nHazard = 2;
+nConditions = nStd * nHazard;
+
 % Preallocate array to store logistic fit parameters for all participants
-% Dimensions: [Block x Participant x Parameter] 
+% Dimensions: [Condition x Participant x Parameter]
+% Condition index = (stdIdx-1)*nHazard + hazardIdx, ranging 1-6
 % Parameters: 1=beta0 (intercept), 2=beta1 (slope), 3=lowerAsy, 4=upperAsy, 5=EffectiveAccuracy
-allParams = NaN(5, length(participantIDs), 5); 
+allParams = NaN(nConditions, length(participantIDs), 5);
 
 % Preallocate array to store raw accuracy as a function of frames since switch
-maxFramesPossible = 2000; 
-% Dimensions: [Block x Participant x FrameIndex]
-allRawAcc = NaN(5, length(participantIDs), maxFramesPossible);
+maxFramesPossible = 2000;
+% Dimensions: [Condition x Participant x FrameIndex]
+allRawAcc = NaN(nConditions, length(participantIDs), maxFramesPossible);
+
+% NEW: Store actual std/hazard values (not just indices) for labeling plots later
+% Dimensions: [Condition x Participant x (stdVal, hazardVal)]
+allActualVals = NaN(nConditions, length(participantIDs), 2);
 
 %% --- Individual Participant Loop ---
 % Iterate over each specified participant to extract data and fit logistic models
 for p = 1:length(participantIDs)
     pid = participantIDs(p);
+    pidStr = sprintf('%03d', pid); % zero-padded participant ID (p001, p002, ...)
     
     % Load behavioral data for the current participant
-    load(['/Users/janebaker/Desktop/triangles/taskData/finalData/p' num2str(pid) '.mat']);
+    load(['/Users/janebaker/Desktop/triangles/taskData/finalData/p' pidStr '.mat']);
     
     % Extract unique block numbers and map them for filtering
     blocks = unique([data.blockNumber]);
     blockNum = [data.blockNumber];
     
-    % Loop through blocks (starting at index 2, typically skipping training/practice)
+    % Loop through blocks (starting at index 2, skipping training/practice block,
+    % which is confirmed to always be the lowest blockNumber)
     for b = 2:length(blocks)
         % Filter task data, source states, and participant responses for this specific block
         thisBlockTask = data(blockNum == blocks(b));
@@ -37,6 +49,17 @@ for p = 1:length(participantIDs)
         thisBlockBelief = [thisBlockTask.keyPressed];
         stdIdx = thisBlockTask(1).stdHrzIdx;
         hIdx = thisBlockTask(1).hazardIdx;
+        
+        % NEW: pull actual std/hazard values for labeling
+        stdVal = thisBlockTask(1).stdHrz;
+        hVal = thisBlockTask(1).H;
+        
+        % Compute condition index from std/hazard rather than relying on block number
+        condIdx = (stdIdx - 1) * nHazard + hIdx;
+        
+        % Store actual values for this condition/participant
+        allActualVals(condIdx, p, 1) = stdVal;
+        allActualVals(condIdx, p, 2) = hVal;
         
         nTrials = length(thisBlockTask);
         
@@ -68,7 +91,7 @@ for p = 1:length(participantIDs)
         % Calculate and store the mean raw accuracy for every frame interval
         maxX = max(trialFramesSince);
         for n = 1:maxX
-            allRawAcc(b, p, n) = mean(trialIsCorrect(trialFramesSince == n));
+            allRawAcc(condIdx, p, n) = mean(trialIsCorrect(trialFramesSince == n));
         end
         
         % Logistic Fit
@@ -84,19 +107,21 @@ for p = 1:length(participantIDs)
             lowerAsy = fits(end-1);   % Lower asymptote (chance level)
             upperAsy = 1 - fits(end); % Upper asymptote (maximum accuracy achieved)
             
-            % Logic: Only use bottom asymptote for P10 in Block 3 (likely due to inverted mapping/performance issue)
-            if pid == 10 && b == 3
+            % General rule: if the fitted slope is negative, accuracy is decreasing
+            % over time since switch (inverted relationship), so the effective
+            % "ceiling" accuracy is actually the lower asymptote in that case.
+            if beta1 < 0
                 effAcc = lowerAsy;
             else
                 effAcc = upperAsy;
             end
             
             % Store extracted parameters for Group Calculation
-            allParams(b, p, 1) = beta0;
-            allParams(b, p, 2) = beta1;
-            allParams(b, p, 3) = lowerAsy;
-            allParams(b, p, 4) = upperAsy;
-            allParams(b, p, 5) = effAcc;
+            allParams(condIdx, p, 1) = beta0;
+            allParams(condIdx, p, 2) = beta1;
+            allParams(condIdx, p, 3) = lowerAsy;
+            allParams(condIdx, p, 4) = upperAsy;
+            allParams(condIdx, p, 5) = effAcc;
 
             % --- Plot Individual Figure ---
             % Create an invisible figure to prevent pop-up spam during batch processing
@@ -151,36 +176,47 @@ for p = 1:length(participantIDs)
             
             xlabel('Seconds Since Source Switch', 'FontSize', 24, 'FontWeight', 'bold');
             ylabel('Accuracy', 'FontSize', 24, 'FontWeight', 'bold');
-            title(sprintf('P%d Std %d H %d: Logistic Fit', pid, stdIdx, hIdx), 'FontSize', 30);
+            title(sprintf('P%s Std %.3f H %.3f: Logistic Fit', pidStr, stdVal, hVal), 'FontSize', 30);
             
             % Uncomment to save individual plots
-            %saveas(f, fullfile(figurePath, sprintf('p%d_b%d_logistic_fit.png', pid, b)));
+            %saveas(f, fullfile(figurePath, sprintf('p%s_std%d_h%d_logistic_fit.png', pidStr, stdIdx, hIdx)));
             close(f);
         catch ME
             % Error handling to prevent one bad fit from stopping the entire script
-            fprintf('Fit failed for P %d Std %d H %d: Logistic Fit', pid, stdIdx, hIdx, ME.message);
+            fprintf('Fit failed for P%s Std %.3f H %.3f: %s\n', pidStr, stdVal, hVal, ME.message);
         end
     end
 end
 
 %% --- Generate Group Average Figures ---
-% Loop through blocks to create cross-participant aggregate visualisations
-for b = 2:length(blocks)
+% Loop through conditions (std x hazard combinations) to create cross-participant
+% aggregate visualisations. Loop is over condition index (1-6), not raw block
+% number, since block order is randomized and no longer meaningful.
+for condIdx = 1:nConditions
+    
+    % Recover the std/hazard indices that this condition corresponds to
+    stdIdx = floor((condIdx - 1) / nHazard) + 1;
+    hIdx = mod(condIdx - 1, nHazard) + 1;
+    
+    % Recover the actual std/hazard values (averaged across participants, should
+    % be consistent within a condition, but averaged for safety)
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
     % Calculate group means for each parameter, ignoring NaN values (failed fits)
-    avgBeta0    = nanmean(allParams(b, :, 1));
-    avgBeta1    = nanmean(allParams(b, :, 2));
-    avgLowerAsy = nanmean(allParams(b, :, 3));
-    avgEffAcc   = nanmean(allParams(b, :, 5)); 
+    avgBeta0    = nanmean(allParams(condIdx, :, 1));
+    avgBeta1    = nanmean(allParams(condIdx, :, 2));
+    avgLowerAsy = nanmean(allParams(condIdx, :, 3));
+    avgEffAcc   = nanmean(allParams(condIdx, :, 5)); 
     
-    % Skip if no valid parameters were generated for this block
+    % Skip if no valid parameters were generated for this condition
     if isnan(avgBeta0), continue; end
     
     % Reconstruct the average fits array for generating the group logistic line
     avgFits = [avgBeta0; avgBeta1; avgLowerAsy; (1 - avgEffAcc)];
     
     % Calculate the group-average raw accuracy across valid frames
-    groupRawAcc = squeeze(nanmean(allRawAcc(b, :, :), 2));
+    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, :), 2));
     lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
     groupRawAcc = groupRawAcc(1:lastValidIdx);
     
@@ -234,12 +270,96 @@ for b = 2:length(blocks)
     xlabel('Seconds Since Source Switch', 'FontSize', 30, 'FontWeight', 'bold');
     ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
     
-    % Map block index to condition title for presentation
-    titles = ["Low Uncertainty", "High Uncertainty"];
-
-    % Since blocks start at 2, b-1 correctly selects index 1 and 2 from titles array
-    title(titles(b-1), 'FontSize', 36)
+    % Title using actual std/hazard values
+    title(sprintf('Std %.3f, Hazard %.3f', avgStdVal, avgHVal), 'FontSize', 36)
     
     % Save as PDF (Commented out by default)
-    % saveas(f, fullfile(figurePath, sprintf('POSTER_low_Average_Block%d.png', b)));
+    % saveas(f, fullfile(figurePath, sprintf('POSTER_Average_Std%d_H%d.png', stdIdx, hIdx)));
 end
+
+close all
+
+%% --- Individual Participant Accuracy Comparison (Outlier Check) ---
+% Visualize each participant's effective accuracy across all std/hazard
+% conditions to help identify any outlier participants or conditions.
+
+% Extract effective accuracy for all participants and conditions
+% Rows = conditions, Columns = participants
+accMatrix = squeeze(allParams(:, :, 5)); % [nConditions x nParticipants]
+
+% Build condition labels using the actual std/hazard values (averaged
+% across participants, should be consistent within a condition)
+condLabels = strings(nConditions, 1);
+for condIdx = 1:nConditions
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal = nanmean(allActualVals(condIdx, :, 2));
+    condLabels(condIdx) = sprintf('Std %.3f\nH %.3f', avgStdVal, avgHVal);
+end
+condLabelsCell = cellstr(condLabels);
+
+% Build legend labels for each participant (P001, P002, ...)
+legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
+
+%% --- Option 1: Grouped Bar Chart (one group per condition, one bar per participant) ---
+f = figure;
+bh = bar(accMatrix, 'grouped');
+
+% Assign distinct colors per participant for easy tracking across conditions
+cmap = lines(length(participantIDs));
+for i = 1:length(bh)
+    bh(i).FaceColor = cmap(i, :);
+end
+
+hold on;
+
+% Overlay the group mean per condition as a black marker for quick reference
+groupMeans = nanmean(accMatrix, 2);
+meanHandle = plot(1:nConditions, groupMeans, 'ko', 'MarkerFaceColor', 'k', ...
+    'MarkerSize', 10, 'LineWidth', 2);
+
+% --- Formatting ---
+ax = gca;
+ax.FontSize = 16;
+ax.LineWidth = 2;
+ax.XTick = 1:nConditions;
+ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 0;
+ylim([0 1]);
+ylabel('Effective Accuracy', 'FontSize', 20, 'FontWeight', 'bold');
+xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
+title('Individual Participant Accuracy by Condition', 'FontSize', 24);
+grid on;
+
+legend([bh, meanHandle], [legendLabels, {'Group Mean'}], ...
+    'Location', 'eastoutside', 'FontSize', 12);
+
+% Save figure (commented out by default)
+% saveas(f, fullfile(figurePath, 'individual_accuracy_by_condition_bar.png'));
+
+%% --- Option 2: Heatmap (Participant x Condition) ---
+% Often better for outlier detection: a participant row that's a
+% consistently different color stands out, and a condition column that's
+% uniformly off stands out separately.
+f2 = figure;
+imagesc(accMatrix'); % transpose so rows = participants, columns = conditions
+colormap(parula);
+cb = colorbar;
+cb.Label.String = 'Effective Accuracy';
+cb.Label.FontSize = 16;
+cb.Label.FontWeight = 'bold';
+clim([0 1]);
+
+ax = gca;
+ax.FontSize = 14;
+ax.XTick = 1:nConditions;
+ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 0;
+ax.YTick = 1:length(participantIDs);
+ax.YTickLabel = legendLabels;
+
+xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
+ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
+title('Heatmap of Effective Accuracy: Participant x Condition', 'FontSize', 24);
+
+% Save figure (commented out by default)
+% saveas(f2, fullfile(figurePath, 'heatmap_accuracy_participant_by_condition.png'));

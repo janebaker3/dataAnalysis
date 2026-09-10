@@ -12,6 +12,22 @@ nStd = 3;
 nHazard = 2;
 nConditions = nStd * nHazard;
 
+% FIX #2: Cap on beta1 (the logistic slope coefficient on frames-since-
+% switch). Several individual AND pooled fits were hitting beta1 = 25-50,
+% which is a quasi-complete-separation degenerate solution -- it means
+% the optimizer found that accuracy jumps from one asymptote to the other
+% in less than a single frame, which produced flat-looking fit lines that
+% ignored the actual gradual rise visible in the raw data (see Std480/
+% H0.003 condition). This is most common in low-hazard conditions where
+% switches are rare, so at long times-since-switch there is essentially
+% zero response variance (P(correct)=1 exactly), which drives ML slope
+% estimates toward infinity.
+% Well-constrained/well-behaved fits in this dataset show beta1 in the
+% ~0.01-0.15 range, so 1.5 is a generous cap that only kicks in for
+% genuinely degenerate fits, while still allowing considerably faster
+% transitions than anything currently well-resolved.
+beta1Cap = 1.5;
+
 % Preallocate array to store logistic fit parameters for all participants
 % Dimensions: [Condition x Participant x Parameter]
 % Condition index = (stdIdx-1)*nHazard + hazardIdx, ranging 1-6
@@ -29,7 +45,7 @@ allActualVals = NaN(nConditions, length(participantIDs), 2);
 % Dimensions: [Condition x Participant] - simple overall accuracy per block
 allOverallAcc = NaN(nConditions, length(participantIDs));
 
-% NEW: Dimensions: [Condition x Participant x (lowerAsySEM, upperAsySEM)]
+% Dimensions: [Condition x Participant x (lowerAsySEM, upperAsySEM)]
 % Stores the standard error of each asymptote estimate, which gives a
 % direct, statistically principled measure of how well-constrained each
 % fit is (rather than relying only on switch count as an indirect proxy)
@@ -127,11 +143,10 @@ for p = 1:length(participantIDs)
         pooledFitData{condIdx} = [pooledFitData{condIdx}; fitData];
 
         try
-            % Fit a 4-parameter logistic function with lower and upper bounds ('lu2')
-            % Now requesting sems (standard errors) as second output, which
-            % gives a direct measure of how well-constrained each asymptote
-            % estimate is
-            [fits, sems, ~, ~, ~] = logist_fit(fitData, 'lu2');
+            % FIX #2: Use the beta1-capped wrapper instead of calling
+            % logist_fit directly, to prevent quasi-complete-separation
+            % solutions (beta1 -> 25-50) seen in low-hazard conditions.
+            [fits, sems] = fitLogisticCapped(fitData, 'lu2', beta1Cap);
             
             % Extract fitted parameters
             beta0 = fits(1);          % Intercept
@@ -140,15 +155,10 @@ for p = 1:length(participantIDs)
             upperAsy = 1 - fits(end); % Upper asymptote (maximum accuracy achieved)
             
             % SEMs are in the same order as fits: [betas..., gamma_sem, lambda_sem]
-            % gamma_sem = SEM of lowerAsy; lambda_sem = SEM of fits(end),
-            % which is also the SEM of upperAsy (linear transform 1-x
-            % doesn't change the magnitude of the SEM)
             lowerAsySEM = sems(end-1);
             upperAsySEM = sems(end);
             
             % --- Diagnostic Checks: Flag suspicious/non-converged fits ---
-            % Count actual number of source switches in this block (used to
-            % assess whether there was enough data to constrain the fit)
             nSwitches = sum(diff(thisBlockSource) ~= 0) + 1;
             
             flagReasons = {};
@@ -161,18 +171,55 @@ for p = 1:length(participantIDs)
             if abs(beta1) < 1e-6
                 flagReasons{end+1} = 'near-zero slope';
             end
-            % Flag based on actual estimation uncertainty (SEM) rather than
-            % just switch count -- a direct measure of how well-constrained
-            % this specific fit is
             semThreshold = 0.1;
             if lowerAsySEM > semThreshold || upperAsySEM > semThreshold
                 flagReasons{end+1} = sprintf('high asymptote uncertainty (lowerSEM=%.3f, upperSEM=%.3f)', ...
                     lowerAsySEM, upperAsySEM);
             end
-            % Updated boundary check: bounds widened from [0,0.2]/[0.8,1]
-            % to [0,0.5]/[0.5,1] in logist_setup.m, so check against 0.5 now
             if abs(lowerAsy - 0.5) < 1e-6 || abs(upperAsy - 0.5) < 1e-6
                 flagReasons{end+1} = 'hit logist_fit bound (0.5)';
+            end
+            % NEW: flag fits that hit the new beta1 cap -- indicates the
+            % data wants an even steeper (likely degenerate) transition
+            % than we're now allowing, so timing-related outputs
+            % (midpoint, slope) for this fit should be treated as
+            % low-confidence even though the asymptotes should now be
+            % much better behaved than the uncapped version
+            if abs(abs(beta1) - beta1Cap) < 1e-3
+                flagReasons{end+1} = sprintf('hit beta1 cap (%.2f)', beta1Cap);
+            end
+            
+            % FIX #1: Determine which asymptote represents genuine
+            % "settled" performance using the SIGN of beta1, rather than
+            % proximity to raw overall accuracy. The raw-accuracy-
+            % proximity heuristic failed specifically in high-hazard
+            % conditions, where a large fraction of ALL trials fall in
+            % the pre-asymptote ramp period -- this pulls the overall
+            % mean toward the "wrong" asymptote even when the fit itself
+            % is well-behaved and clearly rising/falling in one direction.
+            % Sign-of-beta1 avoids this because it looks at the fitted
+            % dynamics directly rather than a mean that's contaminated by
+            % how much of the block was spent still transitioning.
+            if beta1 > 0
+                effAcc = upperAsy;
+            else
+                effAcc = lowerAsy;
+            end
+            
+            % Sanity check: does the sign of beta1 actually agree with
+            % the raw data's direction (early vs. late accuracy after a
+            % switch)? Flag if not, since this would mean sign-of-beta1
+            % itself is unreliable for this particular fit (e.g., noisy/
+            % non-monotonic block).
+            earlyWindow = trialFramesSince <= 5;
+            lateWindow  = trialFramesSince >= max(1, maxX - 20) & trialFramesSince <= maxX;
+            earlyAcc = mean(trialIsCorrect(earlyWindow));
+            lateAcc  = mean(trialIsCorrect(lateWindow));
+            dataDirectionPositive = lateAcc > earlyAcc;
+            signMismatch = (beta1 > 0) ~= dataDirectionPositive;
+            if signMismatch
+                flagReasons{end+1} = sprintf('beta1 sign disagrees with raw data trend (early=%.3f, late=%.3f)', ...
+                    earlyAcc, lateAcc);
             end
             
             if ~isempty(flagReasons)
@@ -185,17 +232,6 @@ for p = 1:length(participantIDs)
                     'beta1', beta1, 'lowerAsy', lowerAsy, 'upperAsy', upperAsy, ...
                     'lowerAsySEM', lowerAsySEM, 'upperAsySEM', upperAsySEM, ...
                     'effAcc', NaN, 'flagReason', reasonStr); %#ok<SAGROW>
-            end
-            
-            % Pick whichever asymptote is closer to the model-free raw
-            % accuracy for this block, as a principled way to disambiguate
-            % which one represents genuine "settled" performance rather
-            % than relying on the (often noisy/near-zero) sign of beta1
-            localOverallAcc = allOverallAcc(condIdx, p);
-            if abs(lowerAsy - localOverallAcc) < abs(upperAsy - localOverallAcc)
-                effAcc = lowerAsy;
-            else
-                effAcc = upperAsy;
             end
             
             % Backfill effAcc into the most recent diagnostic log entry, if one was just added
@@ -215,40 +251,25 @@ for p = 1:length(participantIDs)
             allAsySEMs(condIdx, p, 2) = upperAsySEM;
 
             % --- Plot Individual Figure ---
-            % Create an invisible figure to prevent pop-up spam during batch processing
             f = figure('Visible', 'off'); 
             
-            % Convert frames to seconds (assuming 50ms / 20Hz frame rate)
             plotTimeSeconds = (1:maxX) * 0.05;
             
-            % Generate predicted values for the smoothed logistic fit line
             predMatrix = [ones(maxX, 1), (1:maxX)'];
             smoothedAcc = logist_valLU2(fits, predMatrix);
             
-            % Plot Raw Data (Thicker for visibility)
-            % Compute the average accuracy per frame interval just for plotting
             avgAcc = arrayfun(@(n) mean(trialIsCorrect(trialFramesSince == n)), 1:maxX);
             plot(plotTimeSeconds, avgAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.2);
             hold on;
             
-            % Plot Fit Line (Very thick red line)
             plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 4);
             
-            % Asymptote and Tangent Line Logic
-            % Calculate mathematical properties of the curve for visualization
             range = upperAsy - lowerAsy;
-            
-            % Midpoint (inflection point) of the logistic curve
             midpointFrames = -beta0 / beta1;
             midpointSeconds = midpointFrames * 0.05;
-            
-            % Calculate the maximum slope (rate of learning) in accuracy per second
             maxSlopePerSec = ((beta1 * range) / 4) / 0.05;
-            
-            % Y-value at the inflection point
             yMid = (lowerAsy + upperAsy) / 2;
             
-            % Plot the tangent line representing the maximum slope at the midpoint
             if midpointSeconds > 0 && midpointSeconds < 30
                 tX = [midpointSeconds - 1, midpointSeconds + 1];
                 tY = maxSlopePerSec * (tX - midpointSeconds) + yMid;
@@ -256,24 +277,21 @@ for p = 1:length(participantIDs)
                 plot(midpointSeconds, yMid, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 10);
             end
 
-            % --- Poster Formatting ---
             ax = gca;
-            ax.FontSize = 20;           % Tick label size
-            ax.LineWidth = 2;          % Axis line thickness
-            ax.TickLength = [0.02 0.02]; % Larger ticks
-            xlim([0 30]);              % Requested X limit (max 30 seconds)
-            ylim([0 1]);               % Accuracy ranges from 0 to 1
+            ax.FontSize = 20;
+            ax.LineWidth = 2;
+            ax.TickLength = [0.02 0.02];
+            xlim([0 30]);
+            ylim([0 1]);
             grid on;
             
             xlabel('Seconds Since Source Switch', 'FontSize', 24, 'FontWeight', 'bold');
             ylabel('Accuracy', 'FontSize', 24, 'FontWeight', 'bold');
             title(sprintf('P%s Std %.3f H %.3f: Logistic Fit', pidStr, stdVal, hVal), 'FontSize', 30);
             
-            % Uncomment to save individual plots
             %saveas(f, fullfile(figurePath, sprintf('p%s_std%d_h%d_logistic_fit.png', pidStr, stdIdx, hIdx)));
             close(f);
         catch ME
-            % Error handling to prevent one bad fit from stopping the entire script
             fprintf('Fit failed for P%s Std %.3f H %.3f: %s\n', pidStr, stdVal, hVal, ME.message);
         end
     end
@@ -285,28 +303,12 @@ if ~isempty(diagLog)
     fprintf('\n=== %d suspicious fit(s) flagged out of %d total fits ===\n', ...
         height(diagTable), nConditions * length(participantIDs));
     disp(diagTable);
-    
-    % Optional: save to CSV for easier review/sorting outside MATLAB
     % writetable(diagTable, fullfile(figurePath, 'fit_diagnostics.csv'));
 else
     fprintf('\n=== No suspicious fits flagged ===\n');
 end
 
 %% --- Generate Group Average Figures ---
-% Loop through conditions (std x hazard combinations) to create cross-participant
-% aggregate visualisations. Loop is over condition index (1-6), not raw block
-% number, since block order is randomized and no longer meaningful.
-%
-% IMPORTANT: The group curve is now generated by fitting ONE logistic model
-% to the POOLED trial-level data from all participants in this condition,
-% rather than averaging individually-fit parameters. Averaging parameters
-% directly breaks down badly when some individual fits are degenerate
-% (e.g., quasi-complete separation producing beta1~50), since mixing those
-% with well-behaved fits in parameter space produces a curve that
-% represents no one. Pooling trials first also directly fixes the
-% low-switch-count instability, since pooling across 10 participants gives
-% far more switches to constrain the fit than any single participant alone.
-
 groupBeta0s = zeros(1, nConditions);
 groupBeta1s = zeros(1, nConditions);
 groupLowerAsys = zeros(1, nConditions);
@@ -315,25 +317,17 @@ pooledOverallAccs = zeros(1, nConditions);
 
 for condIdx = 1:nConditions
     
-    % Recover the std/hazard indices that this condition corresponds to
     stdIdx = floor((condIdx - 1) / nHazard) + 1;
     hIdx = mod(condIdx - 1, nHazard) + 1;
     
-    % Recover the actual std/hazard values (averaged across participants, should
-    % be consistent within a condition, but averaged for safety)
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
-    % Skip if no data was accumulated for this condition
     if isempty(pooledFitData{condIdx}), continue; end
     
     combinedData = pooledFitData{condIdx};
     nPooledTrials = size(combinedData, 1);
-    nPooledSwitches = sum(diff(combinedData(:,2)) < 0) + size(combinedData,1)*0; % placeholder, see note below
     
-    % Calculate the group-average RAW accuracy across valid frames
-    % (this part is unchanged -- it's a genuine data average, not a
-    % parameter average, so it was never the problem)
     groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, :), 2));
     lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
     groupRawAcc = groupRawAcc(1:lastValidIdx);
@@ -341,21 +335,37 @@ for condIdx = 1:nConditions
     plotTimeSeconds = (1:numFrames) * 0.05;
     
     try
-        % Fit ONE logistic model to the pooled trial-level data
-        [groupFits, groupSems] = logist_fit(combinedData, 'lu2');
+        % FIX #2: capped pooled fit
+        [groupFits, groupSems] = fitLogisticCapped(combinedData, 'lu2', beta1Cap);
         
         groupBeta0 = groupFits(1);
         groupBeta1 = groupFits(2);
         groupLowerAsy = groupFits(end-1);
         groupUpperAsy = 1 - groupFits(end);
         
-        % Pick whichever asymptote is closer to the overall pooled raw
-        % accuracy, same principled logic as the individual-level fits
-        pooledOverallAcc = mean(combinedData(:,end));
-        if abs(groupLowerAsy - pooledOverallAcc) < abs(groupUpperAsy - pooledOverallAcc)
-            groupEffAcc = groupLowerAsy;
-        else
+        % FIX #1: sign-of-beta1 instead of closest-to-raw-mean
+        if groupBeta1 > 0
             groupEffAcc = groupUpperAsy;
+        else
+            groupEffAcc = groupLowerAsy;
+        end
+        
+        pooledOverallAcc = mean(combinedData(:,end));
+        
+        % Sanity check against raw data direction (early vs late in the
+        % pooled/averaged raw accuracy curve)
+        earlyIdx = 1:min(5, numFrames);
+        lateIdx  = max(1, numFrames-20):numFrames;
+        earlyRaw = nanmean(groupRawAcc(earlyIdx));
+        lateRaw  = nanmean(groupRawAcc(lateIdx));
+        dataDirectionPositive = lateRaw > earlyRaw;
+        if (groupBeta1 > 0) ~= dataDirectionPositive
+            fprintf('WARNING: Group fit Std %.3f H %.3f -- beta1 sign disagrees with raw data trend (early=%.3f, late=%.3f)\n', ...
+                avgStdVal, avgHVal, earlyRaw, lateRaw);
+        end
+        if abs(abs(groupBeta1) - beta1Cap) < 1e-3
+            fprintf('WARNING: Group fit Std %.3f H %.3f -- hit beta1 cap (%.2f)\n', ...
+                avgStdVal, avgHVal, beta1Cap);
         end
 
         groupBeta0s(1, condIdx) = groupBeta0;
@@ -364,29 +374,23 @@ for condIdx = 1:nConditions
         groupUpperAsys(1, condIdx) = groupUpperAsy;
         pooledOverallAccs(1, condIdx) = pooledOverallAcc;
 
-        % Generate predicted values for the pooled fit line
         predMatrix = [ones(numFrames, 1), (1:numFrames)'];
         smoothedAcc = logist_valLU2(groupFits, predMatrix);
         
-        % Compute inflection point, max slope, dynamic range for the pooled curve
         groupRange = groupEffAcc - groupLowerAsy;
         midpointSec = (-groupBeta0 / groupBeta1) * 0.05;
         maxSlopePerSec = ((groupBeta1 * groupRange) / 4) / 0.05;
         yMidGroup = (groupLowerAsy + groupEffAcc) / 2;
         
         f = figure;
-        % Plot Group Raw Data background line (unchanged -- genuine data average)
         plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
         hold on;
-        % Plot Pooled Fit Line
         plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
         
-        % Plot horizontal line for the upper asymptote (effective maximum accuracy)
         yline(groupEffAcc, '--k', 'LineWidth', 2.5);
         text(28, groupEffAcc - 0.05, sprintf('Asy: %.2f', groupEffAcc), ...
             'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
         
-        % Midpoint / Slope representation
         if midpointSec > 0 && midpointSec < 30
             tX = [midpointSec - 1.5, midpointSec + 1.5];
             tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
@@ -396,7 +400,6 @@ for condIdx = 1:nConditions
                 'Color', 'b', 'FontWeight', 'bold', 'FontSize', 20);
         end
         
-        % --- Poster Formatting (Maximum Legibility) ---
         ax = gca;
         ax.FontSize = 24;
         ax.LineWidth = 3;
@@ -408,7 +411,6 @@ for condIdx = 1:nConditions
         ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
         title(sprintf('Std %.3f, Hazard %.3f (n=%d trials pooled)', avgStdVal, avgHVal, nPooledTrials), 'FontSize', 30);
         
-        % Save as PDF (Commented out by default)
         % saveas(f, fullfile(figurePath, sprintf('POSTER_Average_Std%d_H%d.png', stdIdx, hIdx)));
         
     catch ME
@@ -417,26 +419,14 @@ for condIdx = 1:nConditions
 end
 
 %% --- Individual Participant Accuracy Comparison (Outlier Check) ---
-% Compare raw overall accuracy (model-free, robust) against logistic
-% effAcc (captures detection-speed-independent ceiling performance) to
-% distinguish genuine behavioral outliers from fitting artifacts.
+accMatrixFit = squeeze(allParams(:, :, 5));
+accMatrixRaw = allOverallAcc;
 
-accMatrixFit = squeeze(allParams(:, :, 5));  % [nConditions x nParticipants] - logistic effAcc
-accMatrixRaw = allOverallAcc;                 % [nConditions x nParticipants] - raw overall accuracy
-
-% Build condition labels using the actual std/hazard values.
-% Using a single-line label (no embedded \n) to avoid a MATLAB
-% tick-rendering issue where multi-line labels for 6 closely-spaced ticks
-% were being torn apart and displayed as if std/hazard were separate,
-% unpaired entries.
 condLabels = strings(nConditions, 1);
 for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
-    % Sanity check: confirm this condition's std/hazard values are
-    % consistent across all participants (i.e., condIdx reliably maps to
-    % the same real condition for everyone). Flag if not.
     stdSpread = nanstd(allActualVals(condIdx, :, 1));
     hSpread = nanstd(allActualVals(condIdx, :, 2));
     if stdSpread > 1e-6 || hSpread > 1e-6
@@ -480,7 +470,6 @@ title('Logistic Fit Asymptote', 'FontSize', 20);
 
 legend(bh2, legendLabels, 'Location', 'eastoutside', 'FontSize', 11);
 
-% Save figure (commented out by default)
 % saveas(f, fullfile(figurePath, 'individual_accuracy_raw_vs_fit_comparison.png'));
 
 %% --- Heatmaps: Raw vs Fit-based Accuracy, side by side ---
@@ -506,5 +495,38 @@ xlabel('Condition', 'FontSize', 16, 'FontWeight', 'bold');
 ylabel('Participant', 'FontSize', 16, 'FontWeight', 'bold');
 title('Logistic Fit Asymptote', 'FontSize', 20);
 
-% Save figure (commented out by default)
 % saveas(f2, fullfile(figurePath, 'heatmap_accuracy_raw_vs_fit_comparison.png'));
+
+%% --- Local Functions ---
+% (Must appear at the end of the script file, per MATLAB script-function rules)
+
+function [fits_, sems_] = fitLogisticCapped(data, lumode, beta1Cap)
+% Wrapper around logist_setup/fmincon that replicates logist_fit.m's
+% fitting mechanics exactly, but caps the beta1 (slope-on-time)
+% parameter to [-beta1Cap, beta1Cap] to prevent quasi-complete-
+% separation solutions. logist_fit.m/logist_setup.m are left untouched
+% since they're shared toolbox files used elsewhere.
+%
+% Assumes the standard single-predictor design used in this script:
+% fitData = [ones(n,1), framesSinceSwitch, correct], so row 1 of the
+% beta bounds (from logist_setup) is the intercept and row 2 is the
+% slope coefficient on framesSinceSwitch -- only row 2 is capped here.
+
+[fun, data_, inits] = logist_setup(data, lumode);
+
+% Cap the slope coefficient (row 2) bounds
+inits(2,2) = -beta1Cap;
+inits(2,3) =  beta1Cap;
+
+% Clip the initial guess into the new bounds too, in case logist_setup's
+% OLS-based first guess already falls outside them
+inits(2,1) = min(max(inits(2,1), -beta1Cap), beta1Cap);
+
+[fits_, ~, ~, ~, ~, ~, H] = fmincon('logist_err', inits(:,1), [], [], [], [], ...
+    inits(:,2), inits(:,3), [], ...
+    optimset('LargeScale', 'off', 'Algorithm', 'active-set', ...
+    'Display', 'off', 'Diagnostics', 'off'), ...
+    fun, data_);
+
+sems_ = sqrt(diag(-((-H)^(-1))));
+end

@@ -73,8 +73,9 @@ if ischar(lumode)
             fun_   = @logist_valLU1;
             inits_ = cat(1, inits_, [0.01 0 0.2]);
         case 'lu2'
+            % MODIFIED
             fun_   = @logist_valLU2;
-            inits_ = cat(1, inits_, [0.01 0 0.2; 0.01 0 0.2]);
+            inits_ = cat(1, inits_, [0.25 0 0.5; 0.25 0 0.5]);
         otherwise
             fun_   = @logist_val;
     end

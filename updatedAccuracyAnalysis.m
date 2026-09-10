@@ -29,11 +29,17 @@ allActualVals = NaN(nConditions, length(participantIDs), 2);
 % Dimensions: [Condition x Participant] - simple overall accuracy per block
 allOverallAcc = NaN(nConditions, length(participantIDs));
 
+% NEW: Dimensions: [Condition x Participant x (lowerAsySEM, upperAsySEM)]
+% Stores the standard error of each asymptote estimate, which gives a
+% direct, statistically principled measure of how well-constrained each
+% fit is (rather than relying only on switch count as an indirect proxy)
+allAsySEMs = NaN(nConditions, length(participantIDs), 2);
+
 % Diagnostic log to flag suspicious/non-converged logistic fits
 % Will be converted to a table at the end for easy sorting/inspection
 diagLog = struct('participant', {}, 'condIdx', {}, 'stdVal', {}, 'hVal', {}, ...
     'nTrials', {}, 'nSwitches', {}, 'beta1', {}, 'lowerAsy', {}, 'upperAsy', {}, ...
-    'effAcc', {}, 'flagReason', {});
+    'lowerAsySEM', {}, 'upperAsySEM', {}, 'effAcc', {}, 'flagReason', {});
 
 %% --- Individual Participant Loop ---
 % Iterate over each specified participant to extract data and fit logistic models
@@ -58,7 +64,7 @@ for p = 1:length(participantIDs)
         stdIdx = thisBlockTask(1).stdHrzIdx;
         hIdx = thisBlockTask(1).hazardIdx;
         
-        % NEW: pull actual std/hazard values for labeling
+        % pull actual std/hazard values for labeling
         stdVal = thisBlockTask(1).stdHrz;
         hVal = thisBlockTask(1).H;
         
@@ -96,6 +102,8 @@ for p = 1:length(participantIDs)
             end
         end
 
+        % Store simple overall accuracy for this block (computed AFTER
+        % trialIsCorrect is actually populated by the loop above)
         allOverallAcc(condIdx, p) = mean(trialIsCorrect);
         
         % Calculate and store the mean raw accuracy for every frame interval
@@ -109,19 +117,29 @@ for p = 1:length(participantIDs)
         fitData = [ones(nTrials, 1), trialFramesSince, trialIsCorrect];
         try
             % Fit a 4-parameter logistic function with lower and upper bounds ('lu2')
-            [fits, ~, ~, ~, ~] = logist_fit(fitData, 'lu2');
+            % Now requesting sems (standard errors) as second output, which
+            % gives a direct measure of how well-constrained each asymptote
+            % estimate is
+            [fits, sems, ~, ~, ~] = logist_fit(fitData, 'lu2');
             
             % Extract fitted parameters
             beta0 = fits(1);          % Intercept
             beta1 = fits(2);          % Slope coefficient
             lowerAsy = fits(end-1);   % Lower asymptote (chance level)
             upperAsy = 1 - fits(end); % Upper asymptote (maximum accuracy achieved)
-
+            
+            % SEMs are in the same order as fits: [betas..., gamma_sem, lambda_sem]
+            % gamma_sem = SEM of lowerAsy; lambda_sem = SEM of fits(end),
+            % which is also the SEM of upperAsy (linear transform 1-x
+            % doesn't change the magnitude of the SEM)
+            lowerAsySEM = sems(end-1);
+            upperAsySEM = sems(end);
+            
             % --- Diagnostic Checks: Flag suspicious/non-converged fits ---
             % Count actual number of source switches in this block (used to
             % assess whether there was enough data to constrain the fit)
             nSwitches = sum(diff(thisBlockSource) ~= 0) + 1;
-
+            
             flagReasons = {};
             if nTrials < 30
                 flagReasons{end+1} = 'low nTrials';
@@ -132,50 +150,58 @@ for p = 1:length(participantIDs)
             if abs(beta1) < 1e-6
                 flagReasons{end+1} = 'near-zero slope';
             end
-            if lowerAsy < 1e-6
-                flagReasons{end+1} = 'lowerAsy == 0';
+            % Flag based on actual estimation uncertainty (SEM) rather than
+            % just switch count -- a direct measure of how well-constrained
+            % this specific fit is
+            semThreshold = 0.1;
+            if lowerAsySEM > semThreshold || upperAsySEM > semThreshold
+                flagReasons{end+1} = sprintf('high asymptote uncertainty (lowerSEM=%.3f, upperSEM=%.3f)', ...
+                    lowerAsySEM, upperAsySEM);
             end
-            if upperAsy > 0.999
-                flagReasons{end+1} = 'upperAsy == 1';
+            % Updated boundary check: bounds widened from [0,0.2]/[0.8,1]
+            % to [0,0.5]/[0.5,1] in logist_setup.m, so check against 0.5 now
+            if abs(lowerAsy - 0.5) < 1e-6 || abs(upperAsy - 0.5) < 1e-6
+                flagReasons{end+1} = 'hit logist_fit bound (0.5)';
             end
-            % Flag suspicious "boundary" values seen repeatedly (e.g., 0.8),
-            % which suggest the optimizer returned a default/init value
-            % rather than a genuine converged fit
-            if abs(lowerAsy - 0.8) < 1e-6 || abs(upperAsy - 0.8) < 1e-6
-                flagReasons{end+1} = 'suspected boundary value (0.8)';
-            end
-
+            
             if ~isempty(flagReasons)
                 reasonStr = strjoin(flagReasons, '; ');
-                fprintf('FLAG: P%s Std %.0f H %.3f (nTrials=%d, nSwitches=%d, beta1=%.4f, lowerAsy=%.3f, upperAsy=%.3f) -- %s\n', ...
-                    pidStr, stdVal, hVal, nTrials, nSwitches, beta1, lowerAsy, upperAsy, reasonStr);
-
+                fprintf('FLAG: P%s Std %.0f H %.3f (nTrials=%d, nSwitches=%d, beta1=%.4f, lowerAsy=%.3f, upperAsy=%.3f, lowerSEM=%.3f, upperSEM=%.3f) -- %s\n', ...
+                    pidStr, stdVal, hVal, nTrials, nSwitches, beta1, lowerAsy, upperAsy, lowerAsySEM, upperAsySEM, reasonStr);
+                
                 diagLog(end+1) = struct('participant', pidStr, 'condIdx', condIdx, ...
                     'stdVal', stdVal, 'hVal', hVal, 'nTrials', nTrials, 'nSwitches', nSwitches, ...
                     'beta1', beta1, 'lowerAsy', lowerAsy, 'upperAsy', upperAsy, ...
+                    'lowerAsySEM', lowerAsySEM, 'upperAsySEM', upperAsySEM, ...
                     'effAcc', NaN, 'flagReason', reasonStr); %#ok<SAGROW>
             end
-
-            % General rule: if the fitted slope is negative, accuracy is decreasing
-            % over time since switch (inverted relationship), so the effective
-            % "ceiling" accuracy is actually the lower asymptote in that case.
-            if beta1 < 0
+            
+            % Pick whichever asymptote is closer to the model-free raw
+            % accuracy for this block, as a principled way to disambiguate
+            % which one represents genuine "settled" performance rather
+            % than relying on the (often noisy/near-zero) sign of beta1
+            localOverallAcc = allOverallAcc(condIdx, p);
+            if abs(lowerAsy - localOverallAcc) < abs(upperAsy - localOverallAcc)
                 effAcc = lowerAsy;
             else
                 effAcc = upperAsy;
             end
-
+            
             % Backfill effAcc into the most recent diagnostic log entry, if one was just added
             if ~isempty(diagLog) && diagLog(end).condIdx == condIdx && strcmp(diagLog(end).participant, pidStr)
                 diagLog(end).effAcc = effAcc;
             end
-
+            
             % Store extracted parameters for Group Calculation
             allParams(condIdx, p, 1) = beta0;
             allParams(condIdx, p, 2) = beta1;
             allParams(condIdx, p, 3) = lowerAsy;
             allParams(condIdx, p, 4) = upperAsy;
             allParams(condIdx, p, 5) = effAcc;
+            
+            % Store SEMs for group-level use
+            allAsySEMs(condIdx, p, 1) = lowerAsySEM;
+            allAsySEMs(condIdx, p, 2) = upperAsySEM;
 
             % --- Plot Individual Figure ---
             % Create an invisible figure to prevent pop-up spam during batch processing
@@ -344,8 +370,6 @@ for condIdx = 1:nConditions
     % saveas(f, fullfile(figurePath, sprintf('POSTER_Average_Std%d_H%d.png', stdIdx, hIdx)));
 end
 
-close all
-
 %% --- Individual Participant Accuracy Comparison (Outlier Check) ---
 % Compare raw overall accuracy (model-free, robust) against logistic
 % effAcc (captures detection-speed-independent ceiling performance) to
@@ -355,7 +379,7 @@ accMatrixFit = squeeze(allParams(:, :, 5));  % [nConditions x nParticipants] - l
 accMatrixRaw = allOverallAcc;                 % [nConditions x nParticipants] - raw overall accuracy
 
 % Build condition labels using the actual std/hazard values.
-% NOTE: Using a single-line label (no embedded \n) to avoid a MATLAB
+% Using a single-line label (no embedded \n) to avoid a MATLAB
 % tick-rendering issue where multi-line labels for 6 closely-spaced ticks
 % were being torn apart and displayed as if std/hazard were separate,
 % unpaired entries.

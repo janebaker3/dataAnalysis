@@ -29,6 +29,8 @@ for p = 1:length(participantIDs)
     blocks = unique([data.blockNumber]);
     blockNum = [data.blockNumber];
 
+    minTrialsPerBin = 4;
+
     for b = 2:length(blocks)
         thisBlockTask = data(blockNum == blocks(b));
         thisBlockSource = [thisBlockTask.sourceIsLeft];
@@ -56,22 +58,38 @@ for p = 1:length(participantIDs)
             trialFramesSince(t) = countSince;
 
             if (thisBlockSource(t) && thisBlockBelief(t) == 'F') || ...
-               (~thisBlockSource(t) && thisBlockBelief(t) == 'J')
+                    (~thisBlockSource(t) && thisBlockBelief(t) == 'J')
                 trialIsCorrect(t) = 1;
             else
                 trialIsCorrect(t) = 0;
             end
         end
 
+        rawMaxX = max(trialFramesSince);
+        counts = accumarray(trialFramesSince, 1, [rawMaxX, 1]);
+        reliableMaxX = find(counts >= minTrialsPerBin, 1, 'last');
+        if isempty(reliableMaxX)
+            reliableMaxX = rawMaxX; % degenerate edge case, shouldn't normally happen
+        end
+
+        if reliableMaxX < rawMaxX
+            fprintf('INFO: P%s Std %.0f H %.3f -- trimmed tail from %d to %d frames (min %d trials/bin)\n', ...
+                pidStr, stdVal, hVal, rawMaxX, reliableMaxX, minTrialsPerBin);
+        end
+
+        keepTrials = trialFramesSince <= reliableMaxX;
+        trialFramesSince = trialFramesSince(keepTrials);
+        trialIsCorrect = trialIsCorrect(keepTrials);
+        nTrialsKept = sum(keepTrials);
+
         allOverallAcc(condIdx, p) = mean(trialIsCorrect);
         allNSwitches(condIdx, p) = sum(diff(thisBlockSource) ~= 0) + 1;
 
-        maxX = max(trialFramesSince);
-        for n = 1:maxX
+        for n = 1:reliableMaxX
             allRawAcc(condIdx, p, n) = mean(trialIsCorrect(trialFramesSince == n));
         end
 
-        fitData = [ones(nTrials, 1), trialFramesSince, trialIsCorrect];
+        fitData = [ones(nTrialsKept, 1), trialFramesSince, trialIsCorrect];
         allTrialData{condIdx, p} = [allTrialData{condIdx, p}; fitData];
     end
 end
@@ -152,7 +170,7 @@ for condIdx = 1:nConditions
             % --- Individual plot (generated for everyone, including outliers) ---
             maxX = size(fitData,1); %#ok<NASGU>
             maxX = max(fitData(:,2));
-            f = figure('Visible', 'on'); %%%%
+            f = figure('Visible', 'off'); %%%%
             plotTimeSeconds = (1:maxX) * frameRate;
             predMatrix = [ones(maxX, 1), (1:maxX)'];
             smoothedAcc = logist_valLU2(fits, predMatrix);
@@ -189,7 +207,7 @@ for condIdx = 1:nConditions
             title(titleStr, 'FontSize', 22, 'Interpreter', 'none');
 
             % saveas(f, fullfile(figurePath, sprintf('P%s_cond%d.png', pidStr, condIdx)));
-            % close(f);
+            close(f);
         catch ME
             fprintf('Individual fit failed for P%s Std %.3f H %.3f: %s\n', pidStr, stdVal, hVal, ME.message);
         end

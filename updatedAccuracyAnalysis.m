@@ -152,7 +152,7 @@ for condIdx = 1:nConditions
             % --- Individual plot (generated for everyone, including outliers) ---
             maxX = size(fitData,1); %#ok<NASGU>
             maxX = max(fitData(:,2));
-            f = figure('Visible', 'off');
+            f = figure('Visible', 'on'); %%%%
             plotTimeSeconds = (1:maxX) * frameRate;
             predMatrix = [ones(maxX, 1), (1:maxX)'];
             smoothedAcc = logist_valLU2(fits, predMatrix);
@@ -189,7 +189,7 @@ for condIdx = 1:nConditions
             title(titleStr, 'FontSize', 22, 'Interpreter', 'none');
 
             % saveas(f, fullfile(figurePath, sprintf('P%s_cond%d.png', pidStr, condIdx)));
-            close(f);
+            % close(f);
         catch ME
             fprintf('Individual fit failed for P%s Std %.3f H %.3f: %s\n', pidStr, stdVal, hVal, ME.message);
         end

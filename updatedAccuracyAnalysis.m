@@ -21,6 +21,9 @@ allActualVals = NaN(nConditions, length(participantIDs), 2);
 allOverallAcc = NaN(nConditions, length(participantIDs));
 allNSwitches = NaN(nConditions, length(participantIDs));
 
+allBeta1SEMs = NaN(nConditions, length(participantIDs));
+allEffAccSEMs = NaN(nConditions, length(participantIDs));
+
 for p = 1:length(participantIDs)
     pid = participantIDs(p);
     pidStr = sprintf('%03d', pid);
@@ -67,6 +70,10 @@ for p = 1:length(participantIDs)
 
         rawMaxX = max(trialFramesSince);
         counts = accumarray(trialFramesSince, 1, [rawMaxX, 1]);
+        if (p == 1 && condIdx == 6) || (p == 10 && condIdx == 6)
+            disp('COUNT: ')
+            disp(counts)
+        end
         reliableMaxX = find(counts >= minTrialsPerBin, 1, 'last');
         if isempty(reliableMaxX)
             reliableMaxX = rawMaxX; % degenerate edge case, shouldn't normally happen
@@ -84,6 +91,10 @@ for p = 1:length(participantIDs)
 
         allOverallAcc(condIdx, p) = mean(trialIsCorrect);
         allNSwitches(condIdx, p) = sum(diff(thisBlockSource) ~= 0) + 1;
+        if (p == 1 && condIdx == 6) || (p == 10 && condIdx == 6)
+            disp('SOURCE SWITCHES: ')
+            disp(allNSwitches(condIdx, p))
+        end
 
         for n = 1:reliableMaxX
             allRawAcc(condIdx, p, n) = mean(trialIsCorrect(trialFramesSince == n));
@@ -155,9 +166,16 @@ for condIdx = 1:nConditions
 
             if beta1 > 0
                 effAcc = upperAsy;
+                effAccSEM = upperAsySEM;
             else
                 effAcc = lowerAsy;
+                effAccSEM = lowerAsySEM;
             end
+
+            allParams(condIdx, p, :) = [beta0, beta1, lowerAsy, upperAsy, effAcc];
+            allAsySEMs(condIdx, p, :) = [lowerAsySEM, upperAsySEM];
+            allBeta1SEMs(condIdx, p) = sems(2);
+            allEffAccSEMs(condIdx, p) = effAccSEM;
 
             allParams(condIdx, p, :) = [beta0, beta1, lowerAsy, upperAsy, effAcc];
             allAsySEMs(condIdx, p, :) = [lowerAsySEM, upperAsySEM];
@@ -170,7 +188,7 @@ for condIdx = 1:nConditions
             % --- Individual plot (generated for everyone, including outliers) ---
             maxX = size(fitData,1); %#ok<NASGU>
             maxX = max(fitData(:,2));
-            f = figure('Visible', 'off'); %%%%
+            f = figure('Visible', 'on');
             plotTimeSeconds = (1:maxX) * frameRate;
             predMatrix = [ones(maxX, 1), (1:maxX)'];
             smoothedAcc = logist_valLU2(fits, predMatrix);
@@ -381,6 +399,209 @@ xlabel('Condition', 'FontSize', 16, 'FontWeight', 'bold');
 ylabel('Participant', 'FontSize', 16, 'FontWeight', 'bold');
 title('Logistic Fit Asymptote (red X = outlier, excluded from group avg)', 'FontSize', 16);
 
+%% --- Weighted group summary bars (individual fits, outlier + invalid-SEM excluded) ---
+weightedMeanAcc = NaN(1, nConditions);
+weightedSEMAcc  = NaN(1, nConditions);
+weightedMeanBeta1 = NaN(1, nConditions);
+weightedSEMBeta1  = NaN(1, nConditions);
+nUsedAcc = NaN(1, nConditions);
+nUsedBeta1 = NaN(1, nConditions);
+
+for condIdx = 1:nConditions
+    keep = ~isOutlier(condIdx, :);
+
+    accVals = squeeze(allParams(condIdx, :, 5));
+    accSEMs = allEffAccSEMs(condIdx, :);
+    validAcc = keep & isfinite(accVals) & isfinite(accSEMs) & accSEMs > 0;
+
+    if any(validAcc)
+        w = 1 ./ (accSEMs(validAcc) .^ 2);
+        weightedMeanAcc(condIdx) = sum(w .* accVals(validAcc)) / sum(w);
+        weightedSEMAcc(condIdx) = sqrt(1 / sum(w));
+        nUsedAcc(condIdx) = sum(validAcc);
+    end
+
+    betaVals = squeeze(allParams(condIdx, :, 2));
+    betaSEMs = allBeta1SEMs(condIdx, :);
+    validBeta = keep & isfinite(betaVals) & isfinite(betaSEMs) & betaSEMs > 0;
+
+    if any(validBeta)
+        w = 1 ./ (betaSEMs(validBeta) .^ 2);
+        weightedMeanBeta1(condIdx) = sum(w .* betaVals(validBeta)) / sum(w);
+        weightedSEMBeta1(condIdx) = sqrt(1 / sum(w));
+        nUsedBeta1(condIdx) = sum(validBeta);
+    end
+end
+
+fprintf('\n=== Weighted group summary (excludes outliers + non-finite/zero SEM fits) ===\n');
+for condIdx = 1:nConditions
+    fprintf('  %s: acc n=%d/%d, beta1 n=%d/%d\n', condLabelsCell{condIdx}, ...
+        nUsedAcc(condIdx), length(participantIDs), nUsedBeta1(condIdx), length(participantIDs));
+end
+
+f3 = figure('Position', [100 100 1400 600]);
+
+subplot(1,2,1);
+bar(weightedMeanAcc, 'FaceColor', [0.4 0.6 0.8]);
+hold on;
+errorbar(1:nConditions, weightedMeanAcc, weightedSEMAcc, 'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 12);
+ax = gca; ax.FontSize = 14; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 30;
+ylim([0 1]); grid on;
+ylabel('Effective Accuracy (weighted mean)', 'FontSize', 16, 'FontWeight', 'bold');
+title('Inverse-variance-weighted mean asymptote across participants', 'FontSize', 16);
+
+subplot(1,2,2);
+bar(weightedMeanBeta1, 'FaceColor', [0.8 0.5 0.4]);
+hold on;
+errorbar(1:nConditions, weightedMeanBeta1, weightedSEMBeta1, 'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 12);
+ax = gca; ax.FontSize = 14; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
+ax.XTickLabelRotation = 30;
+grid on;
+ylabel('\beta_1 (weighted mean)', 'FontSize', 16, 'FontWeight', 'bold');
+title('Inverse-variance-weighted mean slope parameter', 'FontSize', 16);
+
+%% --- Pass 3c: Hierarchical (mixed-effects) group fits, per condition ---
+% Random effects on beta0/beta1 (midpoint/slope) only; asymptotes fixed.
+% Fit on per-participant binned accuracy (allRawAcc), NOT pooled raw trials --
+% avoids the trial-count-weighting artifact from Pass 3b, and matches the
+% Gaussian-residual assumption of nlmefit far better than 0/1 trial outcomes.
+% Fully unconstrained: no beta1 cap, no midpoint bound. Cross-subject shrinkage
+% is the mechanism preventing runaway individual estimates, not hard bounds.
+
+xCapSeconds = 15;
+xCapFrames = round(xCapSeconds / frameRate);
+
+nlmeFixed = NaN(nConditions, 4);      % beta0 beta1 lowerAsy upperLapse (fixed effects / population avg)
+nlmeFixedSE = NaN(nConditions, 4);    % SEs on fixed effects
+nlmeEffAcc = NaN(1, nConditions);
+nlmeRandCov = cell(1, nConditions);   % PSI: random-effect covariance (beta0,beta1)
+nlmeConverged = false(1, nConditions);
+
+for condIdx = 1:nConditions
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal = nanmean(allActualVals(condIdx, :, 2));
+
+    keepP = find(~isOutlier(condIdx, :) & ~cellfun(@isempty, allTrialData(condIdx, :)));
+    if length(keepP) < 3
+        fprintf('Skipping nlme fit for cond %d: too few non-outlier participants (%d)\n', condIdx, length(keepP));
+        continue;
+    end
+
+    % --- Build binned-proportion dataset across kept participants ---
+    Xall = []; Yall = []; Gall = [];
+    for pp = keepP
+        accCurve = squeeze(allRawAcc(condIdx, pp, :));
+        validBins = find(~isnan(accCurve));
+        if isempty(validBins), continue; end
+        Xall = [Xall; validBins]; %#ok<AGROW>
+        Yall = [Yall; accCurve(validBins)]; %#ok<AGROW>
+        Gall = [Gall; repmat(pp, length(validBins), 1)]; %#ok<AGROW>
+    end
+
+    if isempty(Xall)
+        fprintf('Skipping nlme fit for cond %d: no binned data\n', condIdx);
+        continue;
+    end
+
+    % --- Initial fixed-effect guess from mean of individual fits (Pass 3a) ---
+    initBeta0 = nanmean(allParams(condIdx, keepP, 1));
+    initBeta1 = nanmean(allParams(condIdx, keepP, 2));
+    initLowerAsy = nanmean(allParams(condIdx, keepP, 3));
+    initUpperAsy = nanmean(allParams(condIdx, keepP, 4));
+    initUpperLapse = 1 - initUpperAsy;
+    if any(isnan([initBeta0 initBeta1 initLowerAsy initUpperLapse]))
+        fprintf('Skipping nlme fit for cond %d: NaN initial values\n', condIdx);
+        continue;
+    end
+    beta0Init = [initBeta0; initBeta1; initLowerAsy; initUpperLapse];
+
+    opts = statset('MaxIter', 200, 'TolFun', 1e-6, 'TolX', 1e-6); 
+
+    lastwarn('');
+    try
+        [fixedFx, PSI, stats, ~] = nlmefit(Xall, Yall, Gall, [], @nlmeLogisticLU, beta0Init, ...
+            'REParamsSelect', [1 2 3 4], 'Options', opts);
+
+        [warnMsg, ~] = lastwarn();
+        if ~isempty(warnMsg)
+            fprintf('WARNING: cond %d nlme fit raised: %s\n', condIdx, warnMsg);
+            nlmeConverged(condIdx) = false;
+        else
+            nlmeConverged(condIdx) = true;
+        end
+
+        nlmeFixed(condIdx, :) = fixedFx';
+        seVec = sqrt(diag(stats.covb));
+        nlmeFixedSE(condIdx, :) = seVec';
+        nlmeRandCov{condIdx} = PSI;
+
+        groupBeta0 = fixedFx(1);
+        groupBeta1 = fixedFx(2);
+        groupLowerAsy = fixedFx(3);
+        groupUpperAsy = 1 - fixedFx(4);
+
+        if groupBeta1 > 0
+            groupEffAcc = groupUpperAsy;
+        else
+            groupEffAcc = groupLowerAsy;
+        end
+        nlmeEffAcc(condIdx) = groupEffAcc;
+
+        fprintf('Cond %d (Std %.0f H %.3f): nlme fixed effects beta0=%.3f beta1=%.3f lowerAsy=%.3f upperAsy=%.3f\n', ...
+            condIdx, avgStdVal, avgHVal, groupBeta0, groupBeta1, groupLowerAsy, groupUpperAsy);
+
+        % --- Plot: population-average (fixed-effect) curve vs. across-subject mean raw accuracy ---
+        groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, keepP, :), 2));
+        lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
+        maxFrame = min(lastValidIdx, xCapFrames);
+        groupRawAcc = groupRawAcc(1:maxFrame);
+        plotTimeSeconds = (1:maxFrame) * frameRate;
+
+        predPHI = repmat(fixedFx', maxFrame, 1);
+        smoothedAcc = nlmeLogisticLU(predPHI, (1:maxFrame)');
+
+        figure;
+        plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
+        hold on;
+        plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
+
+        midpointSec = (-groupBeta0 / groupBeta1) * frameRate;
+        groupRange = groupEffAcc - groupLowerAsy;
+        maxSlopePerSec = ((groupBeta1 * groupRange) / 4) / frameRate;
+        yMidGroup = (groupLowerAsy + groupEffAcc) / 2;
+
+        yline(groupEffAcc, '--k', 'LineWidth', 2.5);
+        text(xCapSeconds - 1, groupEffAcc - 0.05, sprintf('Asy: %.2f', groupEffAcc), ...
+            'FontWeight', 'bold', 'FontSize', 18, 'HorizontalAlignment', 'right');
+
+        if midpointSec > 0 && midpointSec < xCapSeconds
+            tX = [max(0, midpointSec - 1), min(xCapSeconds, midpointSec + 1)];
+            tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
+            plot(tX, tY, 'b-', 'LineWidth', 4);
+            plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
+        end
+
+        ax = gca;
+        ax.FontSize = 20; ax.LineWidth = 2.5; ax.TickLength = [0.02 0.02];
+        xlim([0 xCapSeconds]); ylim([0 1]); grid on;
+        xlabel('Seconds Since Source Switch', 'FontSize', 24, 'FontWeight', 'bold');
+        ylabel('Accuracy', 'FontSize', 24, 'FontWeight', 'bold');
+        title(sprintf('Std %.0f, H %.3f -- Mixed-effects group fit (n=%d participants, %s)', ...
+            avgStdVal, avgHVal, length(keepP), ...
+            ternary(nlmeConverged(condIdx), 'converged', 'CHECK CONVERGENCE')), ...
+            'FontSize', 18, 'Interpreter', 'none');
+
+    catch ME
+        fprintf('nlme fit failed for cond %d (Std %.3f H %.3f): %s\n', condIdx, avgStdVal, avgHVal, ME.message);
+    end
+end
+
+function out = ternary(cond, a, b)
+if cond, out = a; else, out = b; end
+end
+
+
 %% --- Local Functions ---
 function [fits_, sems_] = fitLogisticCapped(data, lumode, beta1Cap, maxX, midpointSlackLow, midpointSlackHigh)
 
@@ -429,26 +650,24 @@ beta0 = x(1);
 beta1 = x(2);
 if beta1 == 0
     beta1 = 1e-9; % avoid literal div-by-zero; a true zero-slope point
-                   % would make midpoint undefined/infinite anyway, which
-                   % already violates the constraint below
+    % would make midpoint undefined/infinite anyway, which
+    % already violates the constraint below
 end
 midpoint = -beta0 / beta1;
 c = [lowerMid - midpoint; midpoint - upperMid]; % both must be <= 0
 ceq = [];
 end
 
+function Y = nlmeLogisticLU(PHI, X)
+% PHI columns: [beta0, beta1, lowerAsy, upperLapse], one row per observation
+% (nlmefit broadcasts each subject's group-level PHI across their rows)
+beta0 = PHI(:,1);
+beta1 = PHI(:,2);
+lowerAsy = PHI(:,3);
+upperLapse = PHI(:,4);
+upperAsy = 1 - upperLapse;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+linpred = beta0 + beta1 .* X(:,1);
+logistic = 1 ./ (1 + exp(-linpred));
+Y = lowerAsy + (upperAsy - lowerAsy) .* logistic;
+end

@@ -14,6 +14,9 @@ frameRate = 0.05;        % seconds per frame (20 Hz)
 midpointSlackLow  = 0.5; % midpoint allowed up to 0.5*maxX BEFORE t=0
 midpointSlackHigh = 1.5; % and up to 1.5*maxX AFTER t=0
 
+accDeltaThreshold = 0.03;    % max acceptable |delta effective accuracy| to still rescue an outlier
+beta1DeltaThreshold = 0.02;  % max acceptable |delta beta1| to still rescue an outlier
+
 %% --- Pass 1: extract trial-level data for everyone, no fitting yet ---
 allTrialData = cell(nConditions, length(participantIDs));  % [1, framesSince, correct]
 allRawAcc = NaN(nConditions, length(participantIDs), 2000);
@@ -233,12 +236,19 @@ for condIdx = 1:nConditions
 end
 
 %% --- Pass 3b: pooled group fits, excluding within-condition outliers ---
+% NOTE: plotting for these fits now happens in Pass 5, after outlier
+% impact has been assessed and a final inclusion decision made. This
+% section only computes/stores the "all outliers excluded" baseline fit,
+% which Pass 4 uses as its reference and Pass 5 reuses whenever no
+% outlier ends up being rescued for that condition.
 groupBeta0s = NaN(1, nConditions);
 groupBeta1s = NaN(1, nConditions);
 groupLowerAsys = NaN(1, nConditions);
 groupUpperAsys = NaN(1, nConditions);
 groupEffAccs = NaN(1, nConditions);
 pooledOverallAccs = NaN(1, nConditions);
+groupFitsFull = cell(1, nConditions);   % full fit param vector, for reuse
+groupKeepPExcl = cell(1, nConditions);  % participant indices used (outliers excluded)
 
 for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
@@ -246,28 +256,22 @@ for condIdx = 1:nConditions
 
     keepP = find(~isOutlier(condIdx, :) & ~cellfun(@isempty, allTrialData(condIdx, :)));
     if isempty(keepP), continue; end
+    groupKeepPExcl{condIdx} = keepP;
 
     combinedData = vertcat(allTrialData{condIdx, keepP});
-    nPooledTrials = size(combinedData, 1);
-
-    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, keepP, :), 2));
-    lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
-    groupRawAcc = groupRawAcc(1:lastValidIdx);
-    numFrames = length(groupRawAcc);
-    plotTimeSeconds = (1:numFrames) * frameRate;
 
     try
         maxXPooled = max(combinedData(:,2));
         tic;
-        [groupFits, groupSems] = fitLogisticCapped(combinedData, 'lu2', beta1Cap, maxXPooled, midpointSlackLow, midpointSlackHigh);
+        [groupFits, ~] = fitLogisticCapped(combinedData, 'lu2', beta1Cap, maxXPooled, midpointSlackLow, midpointSlackHigh);
         fprintf('Pooled fit for cond %d took %.1f sec\n', condIdx, toc);
+
+        groupFitsFull{condIdx} = groupFits;
 
         groupBeta0 = groupFits(1);
         groupBeta1 = groupFits(2);
         groupLowerAsy = groupFits(end-1);
         groupUpperAsy = 1 - groupFits(end);
-
-        pooledOverallAcc = mean(combinedData(:,end));
 
         if groupBeta1 > 0
             groupEffAcc = groupUpperAsy;
@@ -280,46 +284,246 @@ for condIdx = 1:nConditions
         groupLowerAsys(condIdx) = groupLowerAsy;
         groupUpperAsys(condIdx) = groupUpperAsy;
         groupEffAccs(condIdx) = groupEffAcc;
-        pooledOverallAccs(condIdx) = pooledOverallAcc;
-
-        predMatrix = [ones(numFrames, 1), (1:numFrames)'];
-        smoothedAcc = logist_valLU2(groupFits, predMatrix);
-
-        figure;
-        plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
-        hold on;
-        plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
-
-        groupRange = groupEffAcc - groupLowerAsy;
-        midpointSec = (-groupBeta0 / groupBeta1) * frameRate;
-        maxSlopePerSec = ((groupBeta1 * groupRange) / 4) / frameRate;
-        yMidGroup = (groupLowerAsy + groupEffAcc) / 2;
-
-        yline(groupEffAcc, '--k', 'LineWidth', 2.5);
-        text(28, groupEffAcc - 0.05, sprintf('Asy: %.2f', groupEffAcc), ...
-            'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
-
-        if midpointSec > 0 && midpointSec < 30
-            tX = [midpointSec - 1.5, midpointSec + 1.5];
-            tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
-            plot(tX, tY, 'b-', 'LineWidth', 4);
-            plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
-            text(midpointSec + 0.5, yMidGroup - 0.08, sprintf('Slope: %.2f acc/sec', maxSlopePerSec), ...
-                'Color', 'b', 'FontWeight', 'bold', 'FontSize', 20);
-        end
-
-        ax = gca;
-        ax.FontSize = 24; ax.LineWidth = 3; ax.TickLength = [0.02 0.02];
-        xlim([0 30]); ylim([0 1]); grid on;
-        xlabel('Seconds Since Source Switch', 'FontSize', 30, 'FontWeight', 'bold');
-        ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
-        nExcluded = length(participantIDs) - length(keepP);
-        title(sprintf('Std %.3f, Hazard %.3f (n=%d trials pooled, %d/%d participants, %d excluded as outliers)', ...
-            avgStdVal, avgHVal, nPooledTrials, length(keepP), length(participantIDs), nExcluded), 'FontSize', 24);
+        pooledOverallAccs(condIdx) = mean(combinedData(:,end));
 
     catch ME
         fprintf('Pooled group fit failed for Std %.3f H %.3f: %s\n', avgStdVal, avgHVal, ME.message);
     end
+end
+
+%% --- Pass 4: outlier impact -- compare pooled fit with/without each flagged outlier ---
+% For every condition with at least one flagged outlier, and for EACH such
+% outlier individually, compare:
+%   "Excluding" = pooled fit over all non-outlier participants (from Pass 3b)
+%   "Including" = pooled fit over all non-outlier participants + this ONE outlier added back
+%                 (other outliers in the same condition, if any, remain excluded)
+% This isolates the distortion caused by each individual outlier.
+
+fprintf('\n=== Outlier impact on pooled logistic fits ===\n');
+
+maxInstances = nConditions * length(participantIDs);
+impactCondIdx    = NaN(maxInstances, 1);
+impactPIdx       = NaN(maxInstances, 1);
+impactEffAccExcl = NaN(maxInstances, 1);
+impactEffAccIncl = NaN(maxInstances, 1);
+impactBeta1Excl  = NaN(maxInstances, 1);
+impactBeta1Incl  = NaN(maxInstances, 1);
+nImpactRows = 0;
+
+for condIdx = 1:nConditions
+    outlierPs = find(isOutlier(condIdx, :));
+    if isempty(outlierPs) || isempty(groupFitsFull{condIdx})
+        continue
+    end
+
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal = nanmean(allActualVals(condIdx, :, 2));
+
+    fitsExcl = groupFitsFull{condIdx};
+    keepExcl = groupKeepPExcl{condIdx};
+
+    beta0Excl = fitsExcl(1);
+    beta1Excl = fitsExcl(2);
+    lowerAsyExcl = fitsExcl(end-1);
+    upperAsyExcl = 1 - fitsExcl(end);
+    effAccExcl = upperAsyExcl; if beta1Excl <= 0, effAccExcl = lowerAsyExcl; end
+
+    combinedExclTmp = vertcat(allTrialData{condIdx, keepExcl});
+    maxXExcl = max(combinedExclTmp(:,2));
+    rawAccExcl = computeGroupRawAccTrace(allRawAcc, condIdx, keepExcl);
+
+    for oi = 1:length(outlierPs)
+        thisOutlierP = outlierPs(oi);
+        pidStr = sprintf('%03d', participantIDs(thisOutlierP));
+        if isempty(allTrialData{condIdx, thisOutlierP})
+            continue
+        end
+
+        keepIncl = union(keepExcl, thisOutlierP);
+        combinedIncl = vertcat(allTrialData{condIdx, keepIncl});
+
+        try
+            maxXIncl = max(combinedIncl(:,2));
+            [fitsIncl, ~] = fitLogisticCapped(combinedIncl, 'lu2', beta1Cap, maxXIncl, midpointSlackLow, midpointSlackHigh);
+        catch ME
+            fprintf('Including-outlier fit failed for P%s Std %.3f H %.3f: %s\n', pidStr, avgStdVal, avgHVal, ME.message);
+            continue
+        end
+
+        beta0Incl = fitsIncl(1);
+        beta1Incl = fitsIncl(2);
+        lowerAsyIncl = fitsIncl(end-1);
+        upperAsyIncl = 1 - fitsIncl(end);
+        effAccIncl = upperAsyIncl; if beta1Incl <= 0, effAccIncl = lowerAsyIncl; end
+
+        rawAccIncl = computeGroupRawAccTrace(allRawAcc, condIdx, keepIncl);
+
+        fprintf('  Std %.0f H %.3f -- P%s: effAcc excl=%.3f incl=%.3f (delta=%.3f) | beta1 excl=%.3f incl=%.3f (delta=%.3f)\n', ...
+            avgStdVal, avgHVal, pidStr, effAccExcl, effAccIncl, effAccIncl - effAccExcl, ...
+            beta1Excl, beta1Incl, beta1Incl - beta1Excl);
+
+        nImpactRows = nImpactRows + 1;
+        impactCondIdx(nImpactRows) = condIdx;
+        impactPIdx(nImpactRows) = thisOutlierP;
+        impactEffAccExcl(nImpactRows) = effAccExcl;
+        impactEffAccIncl(nImpactRows) = effAccIncl;
+        impactBeta1Excl(nImpactRows) = beta1Excl;
+        impactBeta1Incl(nImpactRows) = beta1Incl;
+
+        % --- Diagnostic leave-one-out plot ---
+        maxXPlot = max(maxXExcl, maxXIncl);
+        predMatrix = [ones(maxXPlot, 1), (1:maxXPlot)'];
+        smoothedExcl = logist_valLU2(fitsExcl, predMatrix);
+        smoothedIncl = logist_valLU2(fitsIncl, predMatrix);
+
+        nExcl = length(rawAccExcl);
+        nIncl = length(rawAccIncl);
+        tExcl = (1:nExcl) * frameRate;
+        tIncl = (1:nIncl) * frameRate;
+        tFit = (1:maxXPlot) * frameRate;
+
+        figure('Position', [100 100 900 650]);
+        hold on;
+        plot(tExcl, rawAccExcl, '-', 'Color', [0.75 0.75 0.75], 'LineWidth', 1.5);
+        plot(tIncl, rawAccIncl, ':', 'Color', [0.4 0.4 0.4], 'LineWidth', 2);
+        plot(tFit, smoothedExcl, 'r-', 'LineWidth', 4);
+        plot(tFit, smoothedIncl, 'b-', 'LineWidth', 4);
+
+        ax = gca;
+        ax.FontSize = 16; ax.LineWidth = 2; ax.TickLength = [0.02 0.02];
+        xlim([0 30]); ylim([0 1]); grid on;
+        xlabel('Seconds Since Source Switch', 'FontSize', 20, 'FontWeight', 'bold');
+        ylabel('Accuracy', 'FontSize', 20, 'FontWeight', 'bold');
+        legend({'Raw (excl. outlier)', 'Raw (incl. outlier)', ...
+                 sprintf('Fit excl. (acc=%.2f, \\beta_1=%.2f)', effAccExcl, beta1Excl), ...
+                 sprintf('Fit incl. (acc=%.2f, \\beta_1=%.2f)', effAccIncl, beta1Incl)}, ...
+                'Location', 'southoutside', 'FontSize', 12);
+        title(sprintf('Std %.0f, H %.3f -- Outlier P%s impact (n excl=%d, n incl=%d)', ...
+            avgStdVal, avgHVal, pidStr, length(keepExcl), length(keepIncl)), 'FontSize', 16);
+    end
+end
+
+impactCondIdx    = impactCondIdx(1:nImpactRows);
+impactPIdx       = impactPIdx(1:nImpactRows);
+impactEffAccExcl = impactEffAccExcl(1:nImpactRows);
+impactEffAccIncl = impactEffAccIncl(1:nImpactRows);
+impactBeta1Excl  = impactBeta1Excl(1:nImpactRows);
+impactBeta1Incl  = impactBeta1Incl(1:nImpactRows);
+impactDeltaAcc   = impactEffAccIncl - impactEffAccExcl;
+impactDeltaBeta1 = impactBeta1Incl - impactBeta1Excl;
+
+%% --- Pass 4b: aggregate outlier-impact summary (across all conditions) ---
+fprintf('\n=== Aggregate outlier impact summary ===\n');
+impactLabels = cell(nImpactRows, 1);
+for i = 1:nImpactRows
+    pidStr = sprintf('%03d', participantIDs(impactPIdx(i)));
+    stdVal = nanmean(allActualVals(impactCondIdx(i), :, 1));
+    hVal = nanmean(allActualVals(impactCondIdx(i), :, 2));
+    impactLabels{i} = sprintf('Std%.0f H%.3f P%s', stdVal, hVal, pidStr);
+    fprintf('  %s: delta acc = %+.3f, delta beta1 = %+.3f\n', impactLabels{i}, impactDeltaAcc(i), impactDeltaBeta1(i));
+end
+
+if nImpactRows > 0
+    [~, sortOrder] = sort(abs(impactDeltaAcc), 'descend');
+
+    figure('Position', [100 100 1400 600]);
+
+    subplot(1,2,1);
+    barh(impactDeltaAcc(sortOrder));
+    hold on;
+    xline(accDeltaThreshold, 'r--', 'LineWidth', 2);
+    xline(-accDeltaThreshold, 'r--', 'LineWidth', 2);
+    ax = gca; ax.FontSize = 11; ax.YTick = 1:nImpactRows; ax.YTickLabel = impactLabels(sortOrder);
+    xlabel('\Delta Effective Accuracy (incl. - excl.)', 'FontSize', 14, 'FontWeight', 'bold');
+    title('Outlier impact on pooled asymptote', 'FontSize', 15);
+    grid on;
+
+    subplot(1,2,2);
+    barh(impactDeltaBeta1(sortOrder));
+    hold on;
+    xline(beta1DeltaThreshold, 'r--', 'LineWidth', 2);
+    xline(-beta1DeltaThreshold, 'r--', 'LineWidth', 2);
+    ax = gca; ax.FontSize = 11; ax.YTick = 1:nImpactRows; ax.YTickLabel = impactLabels(sortOrder);
+    xlabel('\Delta \beta_1 (incl. - excl.)', 'FontSize', 14, 'FontWeight', 'bold');
+    title('Outlier impact on pooled slope', 'FontSize', 15);
+    grid on;
+else
+    fprintf('  (no outlier instances to summarize)\n');
+end
+
+%% --- Pass 4c: decide final inclusion based on impact thresholds ---
+finalOutlierMask = isOutlier; % start from the statistical flags
+
+fprintf('\n=== Final inclusion decisions (threshold: |dAcc|<=%.3f AND |dBeta1|<=%.3f) ===\n', ...
+    accDeltaThreshold, beta1DeltaThreshold);
+for i = 1:nImpactRows
+    condIdx = impactCondIdx(i);
+    p = impactPIdx(i);
+    pidStr = sprintf('%03d', participantIDs(p));
+    stdVal = nanmean(allActualVals(condIdx, :, 1));
+    hVal = nanmean(allActualVals(condIdx, :, 2));
+
+    negligible = abs(impactDeltaAcc(i)) <= accDeltaThreshold && abs(impactDeltaBeta1(i)) <= beta1DeltaThreshold;
+    if negligible
+        finalOutlierMask(condIdx, p) = false;
+        decisionStr = 'RESCUED (included in final pooled fit)';
+    else
+        decisionStr = 'EXCLUDED (impact too large)';
+    end
+    fprintf('  Std %.0f H %.3f P%s: dAcc=%+.3f dBeta1=%+.3f -> %s\n', ...
+        stdVal, hVal, pidStr, impactDeltaAcc(i), impactDeltaBeta1(i), decisionStr);
+end
+
+%% --- Pass 5: final per-condition group plots (using finalOutlierMask) ---
+for condIdx = 1:nConditions
+    if isempty(groupFitsFull{condIdx})
+        continue
+    end
+
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal = nanmean(allActualVals(condIdx, :, 2));
+
+    keepExcl = groupKeepPExcl{condIdx};
+    finalKeepP = find(~finalOutlierMask(condIdx, :) & ~cellfun(@isempty, allTrialData(condIdx, :)));
+
+    outlierPs = find(isOutlier(condIdx, :));
+    rescuedPs = outlierPs(~finalOutlierMask(condIdx, outlierPs));
+    stillExcludedPs = outlierPs(finalOutlierMask(condIdx, outlierPs));
+
+    if isequal(sort(finalKeepP), sort(keepExcl))
+        fitsToPlot = groupFitsFull{condIdx};
+        nUsed = length(keepExcl);
+    else
+        combinedFinal = vertcat(allTrialData{condIdx, finalKeepP});
+        try
+            maxXFinal = max(combinedFinal(:,2));
+            [fitsToPlot, ~] = fitLogisticCapped(combinedFinal, 'lu2', beta1Cap, maxXFinal, midpointSlackLow, midpointSlackHigh);
+        catch ME
+            fprintf('Final refit failed for Std %.3f H %.3f: %s -- falling back to excluding-outliers fit\n', ...
+                avgStdVal, avgHVal, ME.message);
+            fitsToPlot = groupFitsFull{condIdx};
+            finalKeepP = keepExcl;
+        end
+        nUsed = length(finalKeepP);
+    end
+
+    if isempty(outlierPs)
+        statusStr = 'no outliers flagged';
+    else
+        parts = {};
+        if ~isempty(rescuedPs)
+            parts{end+1} = sprintf('rescued: %s', strjoin(arrayfun(@(pp) sprintf('P%03d', participantIDs(pp)), rescuedPs, 'UniformOutput', false), ', ')); %#ok<AGROW>
+        end
+        if ~isempty(stillExcludedPs)
+            parts{end+1} = sprintf('excluded: %s', strjoin(arrayfun(@(pp) sprintf('P%03d', participantIDs(pp)), stillExcludedPs, 'UniformOutput', false), ', ')); %#ok<AGROW>
+        end
+        statusStr = strjoin(parts, ' | ');
+    end
+
+    titleStr = sprintf('Std %.0f, Hazard %.3f (n=%d/%d participants -- %s)', ...
+        avgStdVal, avgHVal, nUsed, length(participantIDs), statusStr);
+
+    plotPooledGroupFit(fitsToPlot, finalKeepP, condIdx, allRawAcc, frameRate, titleStr);
 end
 
 %% --- Bar charts (mean marker computed excluding outliers; bars show everyone) ---
@@ -339,7 +543,7 @@ cmap = lines(length(participantIDs));
 meanRawExclOutliers = NaN(1, nConditions);
 meanFitExclOutliers = NaN(1, nConditions);
 for condIdx = 1:nConditions
-    keep = ~isOutlier(condIdx, :);
+    keep = ~finalOutlierMask(condIdx, :);
     meanRawExclOutliers(condIdx) = nanmean(accMatrixRaw(condIdx, keep));
     meanFitExclOutliers(condIdx) = nanmean(accMatrixFit(condIdx, keep));
 end
@@ -378,7 +582,7 @@ subplot(1,2,1);
 imagesc(accMatrixRaw');
 colormap(parula); cb = colorbar; cb.Label.String = 'Raw Accuracy'; clim([0 1]);
 hold on;
-[rOut, cOut] = find(isOutlier'); % note transpose to match plotted orientation
+[rOut, cOut] = find(finalOutlierMask'); % note transpose to match plotted orientation
 plot(cOut, rOut, 'rx', 'MarkerSize', 14, 'LineWidth', 3);
 ax = gca; ax.FontSize = 12; ax.XTick = 1:nConditions; ax.XTickLabel = condLabelsCell;
 ax.XTickLabelRotation = 30;
@@ -408,7 +612,7 @@ nUsedAcc = NaN(1, nConditions);
 nUsedBeta1 = NaN(1, nConditions);
 
 for condIdx = 1:nConditions
-    keep = ~isOutlier(condIdx, :);
+    keep = ~finalOutlierMask(condIdx, :);
 
     accVals = squeeze(allParams(condIdx, :, 5));
     accSEMs = allEffAccSEMs(condIdx, :);
@@ -460,147 +664,6 @@ ax.XTickLabelRotation = 30;
 grid on;
 ylabel('\beta_1 (weighted mean)', 'FontSize', 16, 'FontWeight', 'bold');
 title('Inverse-variance-weighted mean slope parameter', 'FontSize', 16);
-
-%% --- Pass 3c: Hierarchical (mixed-effects) group fits, per condition ---
-% Random effects on beta0/beta1 (midpoint/slope) only; asymptotes fixed.
-% Fit on per-participant binned accuracy (allRawAcc), NOT pooled raw trials --
-% avoids the trial-count-weighting artifact from Pass 3b, and matches the
-% Gaussian-residual assumption of nlmefit far better than 0/1 trial outcomes.
-% Fully unconstrained: no beta1 cap, no midpoint bound. Cross-subject shrinkage
-% is the mechanism preventing runaway individual estimates, not hard bounds.
-
-xCapSeconds = 15;
-xCapFrames = round(xCapSeconds / frameRate);
-
-nlmeFixed = NaN(nConditions, 4);      % beta0 beta1 lowerAsy upperLapse (fixed effects / population avg)
-nlmeFixedSE = NaN(nConditions, 4);    % SEs on fixed effects
-nlmeEffAcc = NaN(1, nConditions);
-nlmeRandCov = cell(1, nConditions);   % PSI: random-effect covariance (beta0,beta1)
-nlmeConverged = false(1, nConditions);
-
-for condIdx = 1:nConditions
-    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
-    avgHVal = nanmean(allActualVals(condIdx, :, 2));
-
-    keepP = find(~isOutlier(condIdx, :) & ~cellfun(@isempty, allTrialData(condIdx, :)));
-    if length(keepP) < 3
-        fprintf('Skipping nlme fit for cond %d: too few non-outlier participants (%d)\n', condIdx, length(keepP));
-        continue;
-    end
-
-    % --- Build binned-proportion dataset across kept participants ---
-    Xall = []; Yall = []; Gall = [];
-    for pp = keepP
-        accCurve = squeeze(allRawAcc(condIdx, pp, :));
-        validBins = find(~isnan(accCurve));
-        if isempty(validBins), continue; end
-        Xall = [Xall; validBins]; %#ok<AGROW>
-        Yall = [Yall; accCurve(validBins)]; %#ok<AGROW>
-        Gall = [Gall; repmat(pp, length(validBins), 1)]; %#ok<AGROW>
-    end
-
-    if isempty(Xall)
-        fprintf('Skipping nlme fit for cond %d: no binned data\n', condIdx);
-        continue;
-    end
-
-    % --- Initial fixed-effect guess from mean of individual fits (Pass 3a) ---
-    initBeta0 = nanmean(allParams(condIdx, keepP, 1));
-    initBeta1 = nanmean(allParams(condIdx, keepP, 2));
-    initLowerAsy = nanmean(allParams(condIdx, keepP, 3));
-    initUpperAsy = nanmean(allParams(condIdx, keepP, 4));
-    initUpperLapse = 1 - initUpperAsy;
-    if any(isnan([initBeta0 initBeta1 initLowerAsy initUpperLapse]))
-        fprintf('Skipping nlme fit for cond %d: NaN initial values\n', condIdx);
-        continue;
-    end
-    beta0Init = [initBeta0; initBeta1; initLowerAsy; initUpperLapse];
-
-    opts = statset('MaxIter', 200, 'TolFun', 1e-6, 'TolX', 1e-6); 
-
-    lastwarn('');
-    try
-        [fixedFx, PSI, stats, ~] = nlmefit(Xall, Yall, Gall, [], @nlmeLogisticLU, beta0Init, ...
-            'REParamsSelect', [1 2 3 4], 'Options', opts);
-
-        [warnMsg, ~] = lastwarn();
-        if ~isempty(warnMsg)
-            fprintf('WARNING: cond %d nlme fit raised: %s\n', condIdx, warnMsg);
-            nlmeConverged(condIdx) = false;
-        else
-            nlmeConverged(condIdx) = true;
-        end
-
-        nlmeFixed(condIdx, :) = fixedFx';
-        seVec = sqrt(diag(stats.covb));
-        nlmeFixedSE(condIdx, :) = seVec';
-        nlmeRandCov{condIdx} = PSI;
-
-        groupBeta0 = fixedFx(1);
-        groupBeta1 = fixedFx(2);
-        groupLowerAsy = fixedFx(3);
-        groupUpperAsy = 1 - fixedFx(4);
-
-        if groupBeta1 > 0
-            groupEffAcc = groupUpperAsy;
-        else
-            groupEffAcc = groupLowerAsy;
-        end
-        nlmeEffAcc(condIdx) = groupEffAcc;
-
-        fprintf('Cond %d (Std %.0f H %.3f): nlme fixed effects beta0=%.3f beta1=%.3f lowerAsy=%.3f upperAsy=%.3f\n', ...
-            condIdx, avgStdVal, avgHVal, groupBeta0, groupBeta1, groupLowerAsy, groupUpperAsy);
-
-        % --- Plot: population-average (fixed-effect) curve vs. across-subject mean raw accuracy ---
-        groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, keepP, :), 2));
-        lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
-        maxFrame = min(lastValidIdx, xCapFrames);
-        groupRawAcc = groupRawAcc(1:maxFrame);
-        plotTimeSeconds = (1:maxFrame) * frameRate;
-
-        predPHI = repmat(fixedFx', maxFrame, 1);
-        smoothedAcc = nlmeLogisticLU(predPHI, (1:maxFrame)');
-
-        figure;
-        plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
-        hold on;
-        plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
-
-        midpointSec = (-groupBeta0 / groupBeta1) * frameRate;
-        groupRange = groupEffAcc - groupLowerAsy;
-        maxSlopePerSec = ((groupBeta1 * groupRange) / 4) / frameRate;
-        yMidGroup = (groupLowerAsy + groupEffAcc) / 2;
-
-        yline(groupEffAcc, '--k', 'LineWidth', 2.5);
-        text(xCapSeconds - 1, groupEffAcc - 0.05, sprintf('Asy: %.2f', groupEffAcc), ...
-            'FontWeight', 'bold', 'FontSize', 18, 'HorizontalAlignment', 'right');
-
-        if midpointSec > 0 && midpointSec < xCapSeconds
-            tX = [max(0, midpointSec - 1), min(xCapSeconds, midpointSec + 1)];
-            tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
-            plot(tX, tY, 'b-', 'LineWidth', 4);
-            plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
-        end
-
-        ax = gca;
-        ax.FontSize = 20; ax.LineWidth = 2.5; ax.TickLength = [0.02 0.02];
-        xlim([0 xCapSeconds]); ylim([0 1]); grid on;
-        xlabel('Seconds Since Source Switch', 'FontSize', 24, 'FontWeight', 'bold');
-        ylabel('Accuracy', 'FontSize', 24, 'FontWeight', 'bold');
-        title(sprintf('Std %.0f, H %.3f -- Mixed-effects group fit (n=%d participants, %s)', ...
-            avgStdVal, avgHVal, length(keepP), ...
-            ternary(nlmeConverged(condIdx), 'converged', 'CHECK CONVERGENCE')), ...
-            'FontSize', 18, 'Interpreter', 'none');
-
-    catch ME
-        fprintf('nlme fit failed for cond %d (Std %.3f H %.3f): %s\n', condIdx, avgStdVal, avgHVal, ME.message);
-    end
-end
-
-function out = ternary(cond, a, b)
-if cond, out = a; else, out = b; end
-end
-
 
 %% --- Local Functions ---
 function [fits_, sems_] = fitLogisticCapped(data, lumode, beta1Cap, maxX, midpointSlackLow, midpointSlackHigh)
@@ -658,16 +721,54 @@ c = [lowerMid - midpoint; midpoint - upperMid]; % both must be <= 0
 ceq = [];
 end
 
-function Y = nlmeLogisticLU(PHI, X)
-% PHI columns: [beta0, beta1, lowerAsy, upperLapse], one row per observation
-% (nlmefit broadcasts each subject's group-level PHI across their rows)
-beta0 = PHI(:,1);
-beta1 = PHI(:,2);
-lowerAsy = PHI(:,3);
-upperLapse = PHI(:,4);
-upperAsy = 1 - upperLapse;
 
-linpred = beta0 + beta1 .* X(:,1);
-logistic = 1 ./ (1 + exp(-linpred));
-Y = lowerAsy + (upperAsy - lowerAsy) .* logistic;
+function trace = computeGroupRawAccTrace(allRawAcc, condIdx, keepIdx)
+raw = squeeze(nanmean(allRawAcc(condIdx, keepIdx, :), 2));
+lastValidIdx = find(~isnan(raw), 1, 'last');
+if isempty(lastValidIdx)
+    trace = [];
+else
+    trace = raw(1:lastValidIdx);
+end
+end
+
+
+function plotPooledGroupFit(fits, keepP, condIdx, allRawAcc, frameRate, titleStr)
+groupRawAcc = computeGroupRawAccTrace(allRawAcc, condIdx, keepP);
+numFrames = length(groupRawAcc);
+plotTimeSeconds = (1:numFrames) * frameRate;
+predMatrix = [ones(numFrames, 1), (1:numFrames)'];
+smoothedAcc = logist_valLU2(fits, predMatrix);
+
+beta0 = fits(1); beta1 = fits(2);
+lowerAsy = fits(end-1); upperAsy = 1 - fits(end);
+effAcc = upperAsy; if beta1 <= 0, effAcc = lowerAsy; end
+range_ = effAcc - lowerAsy;
+midpointSec = (-beta0 / beta1) * frameRate;
+maxSlopePerSec = ((beta1 * range_) / 4) / frameRate;
+yMidGroup = (lowerAsy + effAcc) / 2;
+
+figure;
+plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
+hold on;
+plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
+yline(effAcc, '--k', 'LineWidth', 2.5);
+text(28, effAcc - 0.05, sprintf('Asy: %.2f', effAcc), ...
+    'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
+
+if midpointSec > 0 && midpointSec < 30
+    tX = [midpointSec - 1.5, midpointSec + 1.5];
+    tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
+    plot(tX, tY, 'b-', 'LineWidth', 4);
+    plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
+    text(midpointSec + 0.5, yMidGroup - 0.08, sprintf('Slope: %.2f acc/sec', maxSlopePerSec), ...
+        'Color', 'b', 'FontWeight', 'bold', 'FontSize', 20);
+end
+
+ax = gca;
+ax.FontSize = 24; ax.LineWidth = 3; ax.TickLength = [0.02 0.02];
+xlim([0 30]); ylim([0 1]); grid on;
+xlabel('Seconds Since Source Switch', 'FontSize', 30, 'FontWeight', 'bold');
+ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
+title(titleStr, 'FontSize', 22, 'Interpreter', 'none');
 end

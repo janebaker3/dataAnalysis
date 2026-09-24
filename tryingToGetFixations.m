@@ -1,3 +1,5 @@
+warning('off','all')
+
 %% --- 1. INITIALIZATION & CONDITION / STRATEGY MAPPING ---
 % Define participant pool (p001 - p010)
 participantIDs = 1:10;
@@ -293,37 +295,27 @@ for c = 1:numConditions
     fprintf('Condition %d (%s): %d/%d participants valid\n', c, condLabels{c}, nValid, numParticipants);
 end
 
-%% --- 2c. DERIVE DATA-DRIVEN FIXATION BOUNDARIES (per condition) ---
-sourceBoundaryPos = nan(numConditions, 1);
-sourceBoundaryNeg = nan(numConditions, 1);
-boundaryFitInfo   = cell(numConditions, 1);
-
+%% --- 2c. DERIVE SINGLE DATA-DRIVEN FIXATION BOUNDARY (pooled across all conditions & participants) ---
+pooledGaze = [];
 for c = 1:numConditions
-    pooled = [];
     for p = 1:numParticipants
         if validEyeData(c, p) && ~isempty(nFilteredStorage{c, p})
-            pooled = [pooled; nFilteredStorage{c, p}(:)];
+            pooledGaze = [pooledGaze; nFilteredStorage{c, p}(:)];
         end
     end
-    if isempty(pooled)
-        warning('No valid pooled gaze data for condition %d (%s); skipping boundary estimation.', c, condLabels{c});
-        continue;
-    end
-    [sourceBoundaryPos(c), sourceBoundaryNeg(c), boundaryFitInfo{c}] = ...
-        computeFixationBoundary(pooled, nSDBoundary, showFixationHistograms, condLabels{c});
 end
 
-fprintf('\n--- Empirically-Derived Source Fixation Boundaries (N = %d SD) ---\n', nSDBoundary);
-for c = 1:numConditions
-    fprintf('Condition %d (%s): boundary = +/- %.3f\n', c, condLabels{c}, sourceBoundaryPos(c));
-end
+[sourceBoundaryPos, sourceBoundaryNeg, boundaryFitInfo] = ...
+    computeFixationBoundary(pooledGaze, nSDBoundary, showFixationHistograms, 'All Conditions Pooled');
 
-%% --- 2d. COMPUTE GLOBAL PROPORTIONS USING DATA-DRIVEN BOUNDARY ---
-for c = 1:numConditions
-    posThr = sourceBoundaryPos(c);
-    negThr = sourceBoundaryNeg(c);
-    if isnan(posThr), continue; end
+fprintf('\n--- Empirically-Derived Source Fixation Boundary (N = %d SD, pooled across all conditions) ---\n', nSDBoundary);
+fprintf('Boundary = +/- %.3f\n', sourceBoundaryPos);
 
+%% --- 2d. COMPUTE GLOBAL PROPORTIONS USING SINGLE POOLED BOUNDARY ---
+posThr = sourceBoundaryPos;
+negThr = sourceBoundaryNeg;
+
+for c = 1:numConditions
     for p = 1:numParticipants
         if ~validEyeData(c, p) || isempty(nFilteredStorage{c, p}), continue; end
 

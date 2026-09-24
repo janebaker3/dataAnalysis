@@ -1,6 +1,52 @@
 %% --- Environment Setup ---
 participantIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
+%% --- Local Strategy Assignment ---
+stratAssignment = cell(nConditions, 1);
+
+% % ---------------- enter manually ----------------------
+% % Condition 1
+% stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
+% 
+% % Condition 2
+% stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
+% 
+% % Condition 3
+% stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
+% 
+% % Condition 4
+% stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
+% 
+% % Condition 5
+% stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
+% 
+% % Condition 6
+% stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
+% % ------------------------------------------------------
+% 
+% %% --- Global Strategy Assignment ---
+% stratAssignment = cell(nConditions, 1);
+% 
+% % ---------------- enter manually ----------------------
+% % Condition 1
+% stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
+% 
+% % Condition 2
+% stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
+% 
+% % Condition 3
+% stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
+% 
+% % Condition 4
+% stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
+% 
+% % Condition 5
+% stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
+% 
+% % Condition 6
+% stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
+% % ------------------------------------------------------
+
 figurePath = '/Users/janebaker/Desktop/triangles/taskData/figures';
 addpath(genpath('~/Desktop/triangles/analysis/eeglab2024.2.1/'))
 addpath(genpath('../../analysis/'))

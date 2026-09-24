@@ -21,9 +21,30 @@ condHazard   = nan(numConditions, 1); % actual H value for each condIdx
 %   stratAssignment{1}(ismember(participantIDs,[1 2])) = 1;
 %   stratAssignment{1}(ismember(participantIDs,[5]))   = 2;
 stratAssignment = cell(numConditions, 1);
-for c = 1:numConditions
-    stratAssignment{c} = nan(numParticipants, 1);
-end
+
+% ---------------- enter manually ----------------------
+% Condition 1
+stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
+
+% Condition 2
+stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
+
+% Condition 3
+stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
+
+% Condition 4
+stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
+
+% Condition 5
+stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
+
+% Condition 6
+stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
+% ------------------------------------------------------
+
+% for c = 1:numConditions
+%     stratAssignment{c} = nan(numParticipants, 1);
+% end
 stratNames = {'Strategy 1', 'Strategy 2', 'Strategy 3'};
 stratColors = [0.00 0.45 0.74; 0.85 0.33 0.10; 0.47 0.67 0.19];
 
@@ -59,6 +80,10 @@ indivDataStorage = cell(numConditions, numParticipants);
 % NaN indicates missing/excluded data
 oppProportion  = nan(numConditions, numParticipants);
 sameProportion = nan(numConditions, numParticipants);
+
+% --- Data-driven fixation boundary settings ---
+nSDBoundary = 1;                 % # of SDs from each peak defining "source" zone; tune after inspecting plots
+showFixationHistograms = true;   % set true to display GMM/histogram diagnostic per condition
 
 %% --- 2. MAIN PROCESSING LOOP (DATA COLLECTION) ---
 for p = 1:numParticipants
@@ -227,33 +252,37 @@ for p = 1:numParticipants
             indivDataStorage{condIdx, p} = [indivDataStorage{condIdx, p}; validPos];
         end
 
-        % Store for Global Analysis (Proportion of time looking at each source)
-        lookCount = 0; oppCount = 0; sameCount = 0;
+        % % Store for Global Analysis (Proportion of time looking at each source)
+        % lookCount = 0; oppCount = 0; sameCount = 0;
+        % 
+        % for f_idx = 1:length(td)
+        %     if f_idx > length(nFiltered), break; end
+        %     if ~isnan(nFiltered(f_idx))
+        %         lookCount = lookCount + 1;
+        % 
+        %         % Determine if participant selected Left ('F') or Right ('J')
+        %         isLeftK = td(f_idx).keyPressed == 'F';
+        % 
+        %         % Check if gaze is strongly biased to the Right (>= 0.80) or Left (<= -0.80)
+        %         lookR = nFiltered(f_idx) >= 0.80;
+        %         isRightK = td(f_idx).keyPressed == 'J';
+        %         lookL = nFiltered(f_idx) <= -0.80;
+        % 
+        %         % Tally whether they are looking at the opposite source they selected,
+        %         % or the same source they selected
+        %         if (isLeftK && lookR) || (isRightK && lookL), oppCount = oppCount + 1;
+        %         elseif (isLeftK && lookL) || (isRightK && lookR), sameCount = sameCount + 1; end
+        %     end
+        % end
+        % % Calculate raw proportions relative to total valid gaze frames
+        % if lookCount > 0
+        %     oppProportion(condIdx, p) = oppCount / lookCount;
+        %     sameProportion(condIdx, p) = sameCount / lookCount;
+        % end
 
-        for f_idx = 1:length(td)
-            if f_idx > length(nFiltered), break; end
-            if ~isnan(nFiltered(f_idx))
-                lookCount = lookCount + 1;
-
-                % Determine if participant selected Left ('F') or Right ('J')
-                isLeftK = td(f_idx).keyPressed == 'F';
-
-                % Check if gaze is strongly biased to the Right (>= 0.80) or Left (<= -0.80)
-                lookR = nFiltered(f_idx) >= 0.80;
-                isRightK = td(f_idx).keyPressed == 'J';
-                lookL = nFiltered(f_idx) <= -0.80;
-
-                % Tally whether they are looking at the opposite source they selected,
-                % or the same source they selected
-                if (isLeftK && lookR) || (isRightK && lookL), oppCount = oppCount + 1;
-                elseif (isLeftK && lookL) || (isRightK && lookR), sameCount = sameCount + 1; end
-            end
-        end
-        % Calculate raw proportions relative to total valid gaze frames
-        if lookCount > 0
-            oppProportion(condIdx, p) = oppCount / lookCount;
-            sameProportion(condIdx, p) = sameCount / lookCount;
-        end
+        % Store raw per-trial normalized gaze + keys for later boundary-based proportion calc
+        nFilteredStorage{condIdx, p}  = nFiltered;
+        keyPressedStorage{condIdx, p} = [td.keyPressed];
     end
 end
 
@@ -264,6 +293,67 @@ for c = 1:numConditions
     fprintf('Condition %d (%s): %d/%d participants valid\n', c, condLabels{c}, nValid, numParticipants);
 end
 
+%% --- 2c. DERIVE DATA-DRIVEN FIXATION BOUNDARIES (per condition) ---
+sourceBoundaryPos = nan(numConditions, 1);
+sourceBoundaryNeg = nan(numConditions, 1);
+boundaryFitInfo   = cell(numConditions, 1);
+
+for c = 1:numConditions
+    pooled = [];
+    for p = 1:numParticipants
+        if validEyeData(c, p) && ~isempty(nFilteredStorage{c, p})
+            pooled = [pooled; nFilteredStorage{c, p}(:)];
+        end
+    end
+    if isempty(pooled)
+        warning('No valid pooled gaze data for condition %d (%s); skipping boundary estimation.', c, condLabels{c});
+        continue;
+    end
+    [sourceBoundaryPos(c), sourceBoundaryNeg(c), boundaryFitInfo{c}] = ...
+        computeFixationBoundary(pooled, nSDBoundary, showFixationHistograms, condLabels{c});
+end
+
+fprintf('\n--- Empirically-Derived Source Fixation Boundaries (N = %d SD) ---\n', nSDBoundary);
+for c = 1:numConditions
+    fprintf('Condition %d (%s): boundary = +/- %.3f\n', c, condLabels{c}, sourceBoundaryPos(c));
+end
+
+%% --- 2d. COMPUTE GLOBAL PROPORTIONS USING DATA-DRIVEN BOUNDARY ---
+for c = 1:numConditions
+    posThr = sourceBoundaryPos(c);
+    negThr = sourceBoundaryNeg(c);
+    if isnan(posThr), continue; end
+
+    for p = 1:numParticipants
+        if ~validEyeData(c, p) || isempty(nFilteredStorage{c, p}), continue; end
+
+        nF   = nFilteredStorage{c, p};
+        keys = keyPressedStorage{c, p};
+
+        lookCount = 0; oppCount = 0; sameCount = 0;
+        for f_idx = 1:length(nF)
+            if ~isnan(nF(f_idx))
+                lookCount = lookCount + 1;
+                isLeftK  = keys(f_idx) == 'F';
+                isRightK = keys(f_idx) == 'J';
+                lookR = nF(f_idx) >= posThr;
+                lookL = nF(f_idx) <= negThr;
+
+                if (isLeftK && lookR) || (isRightK && lookL)
+                    oppCount = oppCount + 1;
+                elseif (isLeftK && lookL) || (isRightK && lookR)
+                    sameCount = sameCount + 1;
+                end
+            end
+        end
+
+        if lookCount > 0
+            oppProportion(c, p)  = oppCount / lookCount;
+            sameProportion(c, p) = sameCount / lookCount;
+        end
+    end
+end
+
 %% --- 3. LOCAL STRATEGIES PLOT (GROUPED BY STRATEGY) ---
 % *** COMMENTED OUT: strategy assignments (stratAssignment) are currently
 % all NaN/empty because individual local strategies have not yet been
@@ -271,61 +361,61 @@ end
 % individual gaze behavior, populate stratAssignment per condition, then
 % uncomment this section. ***
 
-% for c = 1:numConditions
-%     figL = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
-%     legH = [];
-%     legNames = {};
-%
-%     yline(0.5, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2, 'HandleVisibility', 'off');
-%
-%     for s = 1:3
-%         % Determine which participants belong to this strategy AND have
-%         % valid eye data for this condition
-%         inStrat = (stratAssignment{c} == s) & validEyeData(c, :)';
-%         pidsInStrat = participantIDs(inStrat);
-%         nStrat = numel(pidsInStrat);
-%
-%         if nStrat == 0, continue; end
-%
-%         % Gather each valid participant's mean trace for this condition
-%         dataMat = [];
-%         for pp = find(inStrat)'
-%             thisData = indivDataStorage{c, pp};
-%             if isempty(thisData), continue; end
-%             dataMat = [dataMat; mean(thisData, 1, 'omitnan')];
-%         end
-%         if isempty(dataMat), continue; end
-%
-%         % --- TRANSFORMATION ---
-%         dataMat = 1 - (dataMat / 2);
-%         avg = mean(dataMat, 1, 'omitnan');
-%         timeAxis = ((1:length(avg)) - (timeBefore + 1)) * (dsFactor / 1000);
-%
-%         if size(dataMat, 1) > 1
-%             sem = std(dataMat, 0, 1, 'omitnan') ./ sqrt(size(dataMat, 1));
-%             fill([timeAxis, fliplr(timeAxis)], [avg+sem, fliplr(avg-sem)], stratColors(s,:), 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
-%         end
-%
-%         h = plot(timeAxis, avg, 'Color', stratColors(s,:), 'LineWidth', 5);
-%         legH = [legH, h];
-%         legNames{end+1} = sprintf('%s (N=%d)', stratNames{s}, nStrat);
-%     end
-%
-%     set(gca, 'FontSize', 28, 'LineWidth', 3, 'TickDir', 'out');
-%     xlabel('Time (Seconds)', 'FontSize', 36, 'FontWeight', 'bold');
-%     ylabel('Gaze Position', 'FontSize', 36, 'FontWeight', 'bold');
-%     ylim([0 1]);
-%     yticks([0, 0.5, 1]);
-%     yticklabels({'Old Belief Source', 'Center', 'New Belief Source'});
-%
-%     title(condLabels{c}, 'FontSize', 44, 'FontWeight', 'bold');
-%     if ~isempty(legH)
-%         legend(legH, legNames, 'FontSize', 26, 'Location', 'best');
-%     end
-%     xlim([-10 10]); grid on;
-%
-%     % saveas(figL, fullfile(figurePath, [strrep(condLabels{c}, ' ', '') '_Local_Strategies.png']));
-% end
+for c = 1:numConditions
+    figL = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
+    legH = [];
+    legNames = {};
+
+    yline(0.5, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2, 'HandleVisibility', 'off');
+
+    for s = 1:3
+        % Determine which participants belong to this strategy AND have
+        % valid eye data for this condition
+        inStrat = (stratAssignment{c} == s) & validEyeData(c, :)';
+        pidsInStrat = participantIDs(inStrat);
+        nStrat = numel(pidsInStrat);
+
+        if nStrat == 0, continue; end
+
+        % Gather each valid participant's mean trace for this condition
+        dataMat = [];
+        for pp = find(inStrat)'
+            thisData = indivDataStorage{c, pp};
+            if isempty(thisData), continue; end
+            dataMat = [dataMat; mean(thisData, 1, 'omitnan')];
+        end
+        if isempty(dataMat), continue; end
+
+        % --- TRANSFORMATION ---
+        dataMat = 1 - (dataMat / 2);
+        avg = mean(dataMat, 1, 'omitnan');
+        timeAxis = ((1:length(avg)) - (timeBefore + 1)) * (dsFactor / 1000);
+
+        if size(dataMat, 1) > 1
+            sem = std(dataMat, 0, 1, 'omitnan') ./ sqrt(size(dataMat, 1));
+            fill([timeAxis, fliplr(timeAxis)], [avg+sem, fliplr(avg-sem)], stratColors(s,:), 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+        end
+
+        h = plot(timeAxis, avg, 'Color', stratColors(s,:), 'LineWidth', 5);
+        legH = [legH, h];
+        legNames{end+1} = sprintf('%s (N=%d)', stratNames{s}, nStrat);
+    end
+
+    set(gca, 'FontSize', 28, 'LineWidth', 3, 'TickDir', 'out');
+    xlabel('Time (Seconds)', 'FontSize', 36, 'FontWeight', 'bold');
+    ylabel('Gaze Position', 'FontSize', 36, 'FontWeight', 'bold');
+    ylim([0 1]);
+    yticks([0, 0.5, 1]);
+    yticklabels({'Old Belief Source', 'Center', 'New Belief Source'});
+
+    title(condLabels{c}, 'FontSize', 44, 'FontWeight', 'bold');
+    if ~isempty(legH)
+        legend(legH, legNames, 'FontSize', 26, 'Location', 'best');
+    end
+    xlim([-10 10]); grid on;
+
+    % saveas(figL, fullfile(figurePath, [strrep(condLabels{c}, ' ', '') '_Local_Strategies.png']));
+end
 
 %% --- 4. GLOBAL STRATEGIES PLOT (Annotated participants, per condition) ---
 % Excludes participants who did not have enough valid eye data for that
@@ -435,58 +525,58 @@ for p = 1:numParticipants
 end
 
 %% --- 4c. GLOBAL STRATEGIES BAR CHART (Group Average Across Participants, per Condition) ---
-% One figure. X-axis = condition, with 3 grouped bars per condition
-% representing the AVERAGE Same / Opposite / Middle fixation proportions
-% across all valid participants, with SEM error bars.
-
-groupBarData = nan(numConditions, 3); % columns: Same, Opposite, Middle (mean)
-groupErrData = nan(numConditions, 3); % columns: Same, Opposite, Middle (SEM)
-
-for c = 1:numConditions
-    validMask = validEyeData(c, :) & ~isnan(oppProportion(c, :)) & ~isnan(sameProportion(c, :));
-
-    sVals = sameProportion(c, validMask);
-    oVals = oppProportion(c, validMask);
-    mVals = 1 - sVals - oVals;
-
-    nValidC = sum(validMask);
-    if nValidC > 0
-        groupBarData(c, :) = [mean(sVals), mean(oVals), mean(mVals)];
-        if nValidC > 1
-            groupErrData(c, :) = [std(sVals)/sqrt(nValidC), std(oVals)/sqrt(nValidC), std(mVals)/sqrt(nValidC)];
-        else
-            groupErrData(c, :) = [0, 0, 0];
-        end
-    end
-end
-
-figAvg = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
-
-b = bar(groupBarData, 'grouped');
-b(1).FaceColor = [0.20 0.55 0.85]; % Same
-b(2).FaceColor = [0.85 0.30 0.25]; % Opposite
-b(3).FaceColor = [0.60 0.60 0.60]; % Middle
-b(1).EdgeColor = 'k'; b(2).EdgeColor = 'k'; b(3).EdgeColor = 'k';
-b(1).LineWidth = 1.5; b(2).LineWidth = 1.5; b(3).LineWidth = 1.5;
-
-% Add error bars: compute x-positions of each bar within each group
-numBarsPerGroup = size(groupBarData, 2);
-groupWidth = min(0.8, numBarsPerGroup / (numBarsPerGroup + 1.5));
-for i = 1:numBarsPerGroup
-    xPos = (1:numConditions) - groupWidth/2 + (2*i-1) * groupWidth / (2*numBarsPerGroup);
-    errorbar(xPos, groupBarData(:, i), groupErrData(:, i), 'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 12);
-end
-
-set(gca, 'FontSize', 24, 'LineWidth', 2, 'TickDir', 'out');
-set(gca, 'XTick', 1:numConditions, 'XTickLabel', condLabels, 'XTickLabelRotation', 20);
-ylabel('Fixation Proportion', 'FontSize', 32, 'FontWeight', 'bold');
-xlabel('Condition', 'FontSize', 32, 'FontWeight', 'bold');
-ylim([0 1]);
-title('Group Average Global Viewing Strategy (±SEM)', 'FontSize', 40, 'FontWeight', 'bold');
-legend(b, {'Same', 'Opposite', 'Middle'}, 'FontSize', 22, 'Location', 'bestoutside');
-grid on;
-
-% saveas(figAvg, fullfile(figurePath, 'GroupAvg_Global_Strategy_Bar.png'));
+% % One figure. X-axis = condition, with 3 grouped bars per condition
+% % representing the AVERAGE Same / Opposite / Middle fixation proportions
+% % across all valid participants, with SEM error bars.
+% 
+% groupBarData = nan(numConditions, 3); % columns: Same, Opposite, Middle (mean)
+% groupErrData = nan(numConditions, 3); % columns: Same, Opposite, Middle (SEM)
+% 
+% for c = 1:numConditions
+%     validMask = validEyeData(c, :) & ~isnan(oppProportion(c, :)) & ~isnan(sameProportion(c, :));
+% 
+%     sVals = sameProportion(c, validMask);
+%     oVals = oppProportion(c, validMask);
+%     mVals = 1 - sVals - oVals;
+% 
+%     nValidC = sum(validMask);
+%     if nValidC > 0
+%         groupBarData(c, :) = [mean(sVals), mean(oVals), mean(mVals)];
+%         if nValidC > 1
+%             groupErrData(c, :) = [std(sVals)/sqrt(nValidC), std(oVals)/sqrt(nValidC), std(mVals)/sqrt(nValidC)];
+%         else
+%             groupErrData(c, :) = [0, 0, 0];
+%         end
+%     end
+% end
+% 
+% figAvg = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
+% 
+% b = bar(groupBarData, 'grouped');
+% b(1).FaceColor = [0.20 0.55 0.85]; % Same
+% b(2).FaceColor = [0.85 0.30 0.25]; % Opposite
+% b(3).FaceColor = [0.60 0.60 0.60]; % Middle
+% b(1).EdgeColor = 'k'; b(2).EdgeColor = 'k'; b(3).EdgeColor = 'k';
+% b(1).LineWidth = 1.5; b(2).LineWidth = 1.5; b(3).LineWidth = 1.5;
+% 
+% % Add error bars: compute x-positions of each bar within each group
+% numBarsPerGroup = size(groupBarData, 2);
+% groupWidth = min(0.8, numBarsPerGroup / (numBarsPerGroup + 1.5));
+% for i = 1:numBarsPerGroup
+%     xPos = (1:numConditions) - groupWidth/2 + (2*i-1) * groupWidth / (2*numBarsPerGroup);
+%     errorbar(xPos, groupBarData(:, i), groupErrData(:, i), 'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 12);
+% end
+% 
+% set(gca, 'FontSize', 24, 'LineWidth', 2, 'TickDir', 'out');
+% set(gca, 'XTick', 1:numConditions, 'XTickLabel', condLabels, 'XTickLabelRotation', 20);
+% ylabel('Fixation Proportion', 'FontSize', 32, 'FontWeight', 'bold');
+% xlabel('Condition', 'FontSize', 32, 'FontWeight', 'bold');
+% ylim([0 1]);
+% title('Group Average Global Viewing Strategy (±SEM)', 'FontSize', 40, 'FontWeight', 'bold');
+% legend(b, {'Same', 'Opposite', 'Middle'}, 'FontSize', 22, 'Location', 'bestoutside');
+% grid on;
+% 
+% % saveas(figAvg, fullfile(figurePath, 'GroupAvg_Global_Strategy_Bar.png'));
 
 %% --- 5. LOCAL STRATEGIES PLOT (INDIVIDUAL PARTICIPANTS) ---
 % *** COMMENTED OUT per request. Uncomment to inspect each participant's

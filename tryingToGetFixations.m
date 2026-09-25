@@ -393,8 +393,8 @@ fprintf('Min: %.3f | Max: %.3f | Mean: %.3f | SD: %.3f\n', ...
 
 %% --- 2g. CLASSIFY LOW / MODERATE / HIGH CENTRAL FIXATION STRATEGY ---
 % Using pooled tertile cutoffs derived in Section 2f
-lowCut  = tertileSplit(1); % e.g., 0.06
-highCut = tertileSplit(2); % e.g., 0.15
+lowCut  = tertileSplit(1); % 0.06
+highCut = tertileSplit(2); % 0.15
 
 % centralFixCategory(c,p) = 1 (Low), 2 (Moderate), 3 (High), or NaN (invalid)
 centralFixCategory = nan(numConditions, numParticipants);
@@ -446,54 +446,7 @@ xlabel('Condition', 'FontSize', 20, 'FontWeight', 'bold');
 ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
 title('Central Fixation Category by Participant x Condition', 'FontSize', 24, 'FontWeight', 'bold');
 
-% --- (2) Per-participant consistency summary ---
-fprintf('\n--- Per-Participant Category Consistency ---\n');
-fprintf('%-8s %-10s %-20s %-15s\n', 'PID', 'N valid', 'Categories used', 'Modal category %%');
-for p = 1:numParticipants
-    catsRow = centralFixCategory(:, p);
-    validCats = catsRow(~isnan(catsRow));
-    nValid = numel(validCats);
-    if nValid == 0
-        fprintf('%-8s %-10d %-20s %-15s\n', sprintf('p%03d', participantIDs(p)), 0, 'N/A', 'N/A');
-        continue;
-    end
-    uniqueCats = unique(validCats);
-    modeCat = mode(validCats);
-    pctMode = 100 * sum(validCats == modeCat) / nValid;
-    catNamesUsed = strjoin(centralFixLabels(uniqueCats), ', ');
-    fprintf('%-8s %-10d %-20s %-15.1f\n', sprintf('p%03d', participantIDs(p)), nValid, catNamesUsed, pctMode);
-end
 
-% --- (3) Variance decomposition: ICC (between-subject vs within-subject/condition) ---
-allVals = [];
-allGrp  = [];
-for p = 1:numParticipants
-    for c = 1:numConditions
-        v = midProportion(c, p);
-        if ~isnan(v)
-            allVals(end+1, 1) = v; %#ok<AGROW>
-            allGrp(end+1, 1)  = participantIDs(p); %#ok<AGROW>
-        end
-    end
-end
-
-[~, tbl] = anova1(allVals, allGrp, 'off');
-MSB = tbl{2, 4}; % between-groups mean square
-MSW = tbl{3, 4}; % within-groups (error) mean square
-
-% Harmonic-mean-based average group size for unbalanced design
-grpCounts = accumarray(findgroups(allGrp), 1);
-a = numel(grpCounts);       % number of participants with >=1 valid obs
-N = sum(grpCounts);         % total observations
-k0 = (N - sum(grpCounts.^2) / N) / (a - 1);
-
-ICC1 = (MSB - MSW) / (MSB + (k0 - 1) * MSW);
-
-fprintf('\n--- Variance Decomposition (ICC) ---\n');
-fprintf('Between-subject MS = %.5f | Within-subject MS = %.5f\n', MSB, MSW);
-fprintf('ICC(1) = %.3f\n', ICC1);
-fprintf('Interpretation: %.1f%% of variance in central fixation is explained by stable between-subject differences;\n', ICC1*100);
-fprintf('%.1f%% reflects within-subject variation across conditions.\n', (1-ICC1)*100);
 
 %% --- 3. LOCAL STRATEGIES PLOT (GROUPED BY STRATEGY) ---
 % *** COMMENTED OUT: strategy assignments (stratAssignment) are currently

@@ -1,52 +1,6 @@
 %% --- Environment Setup ---
 participantIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-%% --- Local Strategy Assignment ---
-stratAssignment = cell(nConditions, 1);
-
-% % ---------------- enter manually ----------------------
-% % Condition 1
-% stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
-% 
-% % Condition 2
-% stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
-% 
-% % Condition 3
-% stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
-% 
-% % Condition 4
-% stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
-% 
-% % Condition 5
-% stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
-% 
-% % Condition 6
-% stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
-% % ------------------------------------------------------
-% 
-% %% --- Global Strategy Assignment ---
-% stratAssignment = cell(nConditions, 1);
-% 
-% % ---------------- enter manually ----------------------
-% % Condition 1
-% stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
-% 
-% % Condition 2
-% stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
-% 
-% % Condition 3
-% stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
-% 
-% % Condition 4
-% stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
-% 
-% % Condition 5
-% stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
-% 
-% % Condition 6
-% stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
-% % ------------------------------------------------------
-
 figurePath = '/Users/janebaker/Desktop/triangles/taskData/figures';
 addpath(genpath('~/Desktop/triangles/analysis/eeglab2024.2.1/'))
 addpath(genpath('../../analysis/'))
@@ -62,6 +16,51 @@ midpointSlackHigh = 1.5; % and up to 1.5*maxX AFTER t=0
 
 accDeltaThreshold = 0.03;    % max acceptable |delta effective accuracy| to still rescue an outlier
 beta1DeltaThreshold = 0.02;  % max acceptable |delta beta1| to still rescue an outlier
+
+%% --- Strategy Assignment ---
+stratAssignment = cell(nConditions, 1);
+
+% ---------------- enter manually ----------------------
+% Condition 1
+stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
+
+% Condition 2
+stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
+
+% Condition 3
+stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
+
+% Condition 4
+stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
+
+% Condition 5
+stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
+
+% Condition 6
+stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
+% ------------------------------------------------------
+
+% %% --- Global Strategy Assignment ---
+
+% ---------------- enter manually ----------------------
+% % Condition 1
+% stratAssignment{1} = [1; 2; 3; 1; 1; 1; NaN; 2; 1; 2];
+% 
+% % Condition 2
+% stratAssignment{2} = [2; 3; 2; NaN; 1; 2; NaN; 3; 2; 1];
+% 
+% % Condition 3
+% stratAssignment{3} = [2; 3; 2; 1; 2; 3; NaN; 3; 2; 1];
+% 
+% % Condition 4
+% stratAssignment{4} = [1; 3; 3; 1; 3; 3; NaN; 2; 1; 1];
+% 
+% % Condition 5
+% stratAssignment{5} = [2; 3; 3; NaN; 2; 3; NaN; 3; 3; 1];
+% 
+% % Condition 6
+% stratAssignment{6} = [1; 3; 2; 1; 2; 3; NaN; 2; 2; 1];
+% ------------------------------------------------------
 
 %% --- Pass 1: extract trial-level data for everyone, no fitting yet ---
 allTrialData = cell(nConditions, length(participantIDs));  % [1, framesSince, correct]
@@ -710,6 +709,92 @@ ax.XTickLabelRotation = 30;
 grid on;
 ylabel('\beta_1 (weighted mean)', 'FontSize', 16, 'FontWeight', 'bold');
 title('Inverse-variance-weighted mean slope parameter', 'FontSize', 16);
+
+%% --- Strategy-Based Accuracy Analysis ---
+% For each condition, splits participants by which strategy they used
+% (per stratAssignment) and produces one plot per strategy (3 plots per
+% condition, laid out as subplots in a single figure per condition).
+% Participants assigned NaN for a given condition are excluded from all
+% strategy groups. Statistical outliers (finalOutlierMask), if computed
+% earlier in this script, are also excluded here for consistency with
+% the rest of the pipeline -- comment that line out if you'd rather keep
+% outliers in the strategy breakdown.
+
+nStrategies = 3;
+strategyColors = [0.85 0.33 0.10;   % strategy 1
+                   0.00 0.45 0.74;   % strategy 2
+                   0.47 0.67 0.19];  % strategy 3
+
+for condIdx = 1:nConditions
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal   = nanmean(allActualVals(condIdx, :, 2));
+
+    if condIdx > length(stratAssignment) || isempty(stratAssignment{condIdx})
+        continue
+    end
+    stratVec = stratAssignment{condIdx}; % column, one entry per participant
+
+    figure('Position', [100 100 1800 500]);
+    sgtitle(sprintf('Std %.0f, Hazard %.3f -- Accuracy by Strategy', avgStdVal, avgHVal), ...
+        'FontSize', 20, 'FontWeight', 'bold');
+
+    for strat = 1:nStrategies
+        subplot(1, nStrategies, strat);
+
+        keepMask = (stratVec' == strat) & ~cellfun(@isempty, allTrialData(condIdx, :));
+        if exist('finalOutlierMask', 'var')
+            keepMask = keepMask & ~finalOutlierMask(condIdx, :);
+        end
+        keepP = find(keepMask);
+
+        if isempty(keepP)
+            text(0.5, 0.5, sprintf('No participants\nusing Strategy %d', strat), ...
+                'HorizontalAlignment', 'center', 'FontSize', 16);
+            axis off;
+            continue;
+        end
+
+        groupRawAcc = computeGroupRawAccTrace(allRawAcc, condIdx, keepP);
+        numFrames = length(groupRawAcc);
+        plotTimeSeconds = (1:numFrames) * frameRate;
+
+        plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
+        hold on;
+
+        combinedData = vertcat(allTrialData{condIdx, keepP});
+
+        try
+            maxXStrat = max(combinedData(:,2));
+            [fitsStrat, ~] = fitLogisticCapped(combinedData, 'lu2', beta1Cap, maxXStrat, ...
+                midpointSlackLow, midpointSlackHigh);
+
+            predMatrix = [ones(numFrames, 1), (1:numFrames)'];
+            smoothedAcc = logist_valLU2(fitsStrat, predMatrix);
+            plot(plotTimeSeconds, smoothedAcc, '-', 'Color', strategyColors(strat,:), 'LineWidth', 4);
+
+            beta0 = fitsStrat(1); beta1 = fitsStrat(2);
+            lowerAsy = fitsStrat(end-1); upperAsy = 1 - fitsStrat(end);
+            effAcc = upperAsy; if beta1 <= 0, effAcc = lowerAsy; end
+
+            yline(effAcc, '--k', 'LineWidth', 2);
+            text(28, max(min(effAcc - 0.05, 0.95), 0.05), sprintf('Asy: %.2f', effAcc), ...
+                'FontWeight', 'bold', 'FontSize', 14, 'HorizontalAlignment', 'right');
+        catch ME
+            fprintf('Strategy fit failed for cond %d strat %d: %s\n', condIdx, strat, ME.message);
+        end
+
+        ax = gca;
+        ax.FontSize = 14; ax.LineWidth = 1.5; ax.TickLength = [0.02 0.02];
+        xlim([0 30]); ylim([0 1]); grid on;
+        xlabel('Seconds Since Switch', 'FontSize', 16, 'FontWeight', 'bold');
+        ylabel('Accuracy', 'FontSize', 16, 'FontWeight', 'bold');
+
+        pidLabels = strjoin(arrayfun(@(pp) sprintf('P%03d', participantIDs(pp)), ...
+            keepP, 'UniformOutput', false), ', ');
+        title(sprintf('Strategy %d (n=%d: %s)', strat, length(keepP), pidLabels), ...
+            'FontSize', 13, 'Interpreter', 'none');
+    end
+end
 
 %% --- Local Functions ---
 function [fits_, sems_] = fitLogisticCapped(data, lumode, beta1Cap, maxX, midpointSlackLow, midpointSlackHigh)

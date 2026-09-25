@@ -346,6 +346,155 @@ for c = 1:numConditions
     end
 end
 
+% --- Central fixation ("middle") proportion, derived from same/opposite ---
+midProportion = nan(numConditions, numParticipants);
+
+%% --- 2e. COMPUTE CENTRAL FIXATION ("MIDDLE") PROPORTION ---
+for c = 1:numConditions
+    for p = 1:numParticipants
+        if validEyeData(c, p) && ~isnan(oppProportion(c, p)) && ~isnan(sameProportion(c, p))
+            midProportion(c, p) = 1 - sameProportion(c, p) - oppProportion(c, p);
+        end
+    end
+end
+
+%% --- 2f. DIAGNOSTIC: POOLED CENTRAL FIXATION DISTRIBUTION ---
+pooledMid = midProportion(:);
+pooledMid = pooledMid(~isnan(pooledMid));
+
+medianSplit  = median(pooledMid);
+tertileSplit = quantile(pooledMid, [1/3, 2/3]);
+
+figMid = figure('Units', 'inches', 'Position', [1 1 10 7], 'Color', 'w'); hold on;
+
+histogram(pooledMid, 20, 'FaceColor', [0.6 0.6 0.6], 'EdgeColor', 'k');
+
+yl = ylim;
+h1 = plot([medianSplit medianSplit], yl, 'r-', 'LineWidth', 2.5);
+h2 = plot([tertileSplit(1) tertileSplit(1)], yl, 'b--', 'LineWidth', 2.5);
+plot([tertileSplit(2) tertileSplit(2)], yl, 'b--', 'LineWidth', 2.5);
+
+set(gca, 'FontSize', 18, 'LineWidth', 1.5, 'TickDir', 'out');
+xlabel('Central Fixation Proportion (mid)', 'FontSize', 20);
+ylabel('Count', 'FontSize', 20);
+legend([h1, h2], ...
+    {sprintf('Median split (%.2f)', medianSplit), ...
+     sprintf('Tertile splits (%.2f, %.2f)', tertileSplit(1), tertileSplit(2))}, ...
+    'FontSize', 14, 'Location', 'best');
+title(sprintf('Pooled Central Fixation Distribution (N=%d obs)', numel(pooledMid)), 'FontSize', 22);
+grid on;
+
+fprintf('\n--- Pooled Central Fixation (mid) Diagnostics ---\n');
+fprintf('N = %d observations (participant x condition)\n', numel(pooledMid));
+fprintf('Median split point: %.3f\n', medianSplit);
+fprintf('Tertile split points: %.3f, %.3f\n', tertileSplit(1), tertileSplit(2));
+fprintf('Min: %.3f | Max: %.3f | Mean: %.3f | SD: %.3f\n', ...
+    min(pooledMid), max(pooledMid), mean(pooledMid), std(pooledMid));
+
+%% --- 2g. CLASSIFY LOW / MODERATE / HIGH CENTRAL FIXATION STRATEGY ---
+% Using pooled tertile cutoffs derived in Section 2f
+lowCut  = tertileSplit(1); % e.g., 0.06
+highCut = tertileSplit(2); % e.g., 0.15
+
+% centralFixCategory(c,p) = 1 (Low), 2 (Moderate), 3 (High), or NaN (invalid)
+centralFixCategory = nan(numConditions, numParticipants);
+
+for c = 1:numConditions
+    for p = 1:numParticipants
+        m = midProportion(c, p);
+        if isnan(m), continue; end
+
+        if m <= lowCut
+            centralFixCategory(c, p) = 1; % Low
+        elseif m <= highCut
+            centralFixCategory(c, p) = 2; % Moderate
+        else
+            centralFixCategory(c, p) = 3; % High
+        end
+    end
+end
+
+centralFixLabels = {'Low Central Fixation', 'Moderate Central Fixation', 'High Central Fixation'};
+centralFixColors = [0.20 0.55 0.85; 0.90 0.60 0.10; 0.75 0.10 0.15];
+
+fprintf('\n--- Central Fixation Category Counts (Low <= %.2f < Moderate <= %.2f < High) ---\n', lowCut, highCut);
+for c = 1:numConditions
+    nLow = sum(centralFixCategory(c,:) == 1);
+    nMod = sum(centralFixCategory(c,:) == 2);
+    nHigh = sum(centralFixCategory(c,:) == 3);
+    fprintf('Condition %d (%s): Low=%d, Moderate=%d, High=%d\n', c, condLabels{c}, nLow, nMod, nHigh);
+end
+
+%% --- 2h. DIAGNOSTIC: WITHIN- VS BETWEEN-SUBJECT VARIANCE IN CENTRAL FIXATION ---
+
+% --- (1) Heatmap of centralFixCategory: participant x condition ---
+figHeat = figure('Units', 'inches', 'Position', [1 1 12 8], 'Color', 'w');
+catMapDisplay = centralFixCategory'; % participants as rows, conditions as columns
+
+imagesc(catMapDisplay, 'AlphaData', ~isnan(catMapDisplay));
+set(gca, 'Color', [0.85 0.85 0.85]); % NaN cells show as gray background
+
+colormap([centralFixColors]);
+caxis([1 3]);
+cb = colorbar('Ticks', [1 2 3], 'TickLabels', {'Low', 'Moderate', 'High'});
+cb.FontSize = 16;
+
+set(gca, 'FontSize', 16, 'XTick', 1:numConditions, 'XTickLabel', condLabels, ...
+    'XTickLabelRotation', 20, 'YTick', 1:numParticipants, ...
+    'YTickLabel', arrayfun(@(pid) sprintf('p%03d', pid), participantIDs, 'UniformOutput', false));
+xlabel('Condition', 'FontSize', 20, 'FontWeight', 'bold');
+ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
+title('Central Fixation Category by Participant x Condition', 'FontSize', 24, 'FontWeight', 'bold');
+
+% --- (2) Per-participant consistency summary ---
+fprintf('\n--- Per-Participant Category Consistency ---\n');
+fprintf('%-8s %-10s %-20s %-15s\n', 'PID', 'N valid', 'Categories used', 'Modal category %%');
+for p = 1:numParticipants
+    catsRow = centralFixCategory(:, p);
+    validCats = catsRow(~isnan(catsRow));
+    nValid = numel(validCats);
+    if nValid == 0
+        fprintf('%-8s %-10d %-20s %-15s\n', sprintf('p%03d', participantIDs(p)), 0, 'N/A', 'N/A');
+        continue;
+    end
+    uniqueCats = unique(validCats);
+    modeCat = mode(validCats);
+    pctMode = 100 * sum(validCats == modeCat) / nValid;
+    catNamesUsed = strjoin(centralFixLabels(uniqueCats), ', ');
+    fprintf('%-8s %-10d %-20s %-15.1f\n', sprintf('p%03d', participantIDs(p)), nValid, catNamesUsed, pctMode);
+end
+
+% --- (3) Variance decomposition: ICC (between-subject vs within-subject/condition) ---
+allVals = [];
+allGrp  = [];
+for p = 1:numParticipants
+    for c = 1:numConditions
+        v = midProportion(c, p);
+        if ~isnan(v)
+            allVals(end+1, 1) = v; %#ok<AGROW>
+            allGrp(end+1, 1)  = participantIDs(p); %#ok<AGROW>
+        end
+    end
+end
+
+[~, tbl] = anova1(allVals, allGrp, 'off');
+MSB = tbl{2, 4}; % between-groups mean square
+MSW = tbl{3, 4}; % within-groups (error) mean square
+
+% Harmonic-mean-based average group size for unbalanced design
+grpCounts = accumarray(findgroups(allGrp), 1);
+a = numel(grpCounts);       % number of participants with >=1 valid obs
+N = sum(grpCounts);         % total observations
+k0 = (N - sum(grpCounts.^2) / N) / (a - 1);
+
+ICC1 = (MSB - MSW) / (MSB + (k0 - 1) * MSW);
+
+fprintf('\n--- Variance Decomposition (ICC) ---\n');
+fprintf('Between-subject MS = %.5f | Within-subject MS = %.5f\n', MSB, MSW);
+fprintf('ICC(1) = %.3f\n', ICC1);
+fprintf('Interpretation: %.1f%% of variance in central fixation is explained by stable between-subject differences;\n', ICC1*100);
+fprintf('%.1f%% reflects within-subject variation across conditions.\n', (1-ICC1)*100);
+
 %% --- 3. LOCAL STRATEGIES PLOT (GROUPED BY STRATEGY) ---
 % *** COMMENTED OUT: strategy assignments (stratAssignment) are currently
 % all NaN/empty because individual local strategies have not yet been

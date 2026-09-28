@@ -13,6 +13,9 @@ beta1Cap = 1.5;          % prevents quasi-separation / runaway slope fits
 frameRate = 0.05;        % seconds per frame (20 Hz)
 midpointSlackLow  = 0.05; % midpoint allowed up to 0.5*maxX BEFORE t=0
 midpointSlackHigh = 1.5; % and up to 1.5*maxX AFTER t=0
+maxFitSeconds = 15;                               % hard cap on post-switch window used for FITTING
+maxFitFrames  = round(maxFitSeconds / frameRate); % 15 s / 0.05 = 300 frames
+capRawAccToFitWindow = false;                     % false = grey raw line still drawn over full reliable window
 
 %% --- Pass 1: extract trial-level data for everyone, no fitting yet ---
 allTrialData = cell(nConditions, length(participantIDs));  % [1, framesSince, correct]
@@ -72,24 +75,55 @@ for p = 1:length(participantIDs)
             reliableMaxX = rawMaxX; % degenerate edge case, shouldn't normally happen
         end
 
+        % --- HARD CAP on the window used for FITTING ---------------------
+        % Low-hazard blocks give 400-600 frame windows in which the transition
+        % occupies the first ~10 frames and the remaining ~98% sits at asymptote.
+        % The binomial likelihood is then dominated by saturated bins, and a
+        % constant fits nearly as well as a sigmoid -- which is what drives the
+        % midpoint out to its lower bound and leaves beta1 unidentified.
+        % Capping restores the transition's share of the likelihood AND makes
+        % the window comparable across hazard conditions.
+        fitMaxX = min(reliableMaxX, maxFitFrames);
+
         if reliableMaxX < rawMaxX
             fprintf('INFO: P%s Std %.0f H %.3f -- trimmed tail from %d to %d frames (min %d trials/bin)\n', ...
                 pidStr, stdVal, hVal, rawMaxX, reliableMaxX, minTrialsPerBin);
         end
-
-        keepTrials = trialFramesSince <= reliableMaxX;
-        trialFramesSince = trialFramesSince(keepTrials);
-        trialIsCorrect = trialIsCorrect(keepTrials);
-        nTrialsKept = sum(keepTrials);
-
-        allOverallAcc(condIdx, p) = mean(trialIsCorrect);
-        allNSwitches(condIdx, p) = sum(diff(thisBlockSource) ~= 0) + 1;
-
-        for n = 1:reliableMaxX
-            allRawAcc(condIdx, p, n) = mean(trialIsCorrect(trialFramesSince == n));
+        if fitMaxX < reliableMaxX
+            fprintf('CAP:  P%s Std %.0f H %.3f -- fit window capped %d -> %d frames (%.1f s)\n', ...
+                pidStr, stdVal, hVal, reliableMaxX, fitMaxX, maxFitSeconds);
         end
 
-        fitData = [ones(nTrialsKept, 1), trialFramesSince, trialIsCorrect];
+        % Display window (grey raw line) may stay longer than the fit window,
+        % so you can see whether the fitted curve extrapolates sensibly.
+        if capRawAccToFitWindow
+            dispMaxX = fitMaxX;
+        else
+            dispMaxX = reliableMaxX;
+        end
+
+        keepDisp = trialFramesSince <= dispMaxX;
+        keepFit  = trialFramesSince <= fitMaxX;
+
+        dispFramesSince = trialFramesSince(keepDisp);
+        dispIsCorrect   = trialIsCorrect(keepDisp);
+
+        fitFramesSince  = trialFramesSince(keepFit);
+        fitIsCorrect    = trialIsCorrect(keepFit);
+        nTrialsKept     = sum(keepFit);
+
+        % NOTE: overall accuracy is now measured over the SAME window that gets
+        % fit, so the raw-accuracy bar chart and the fitted asymptote describe
+        % the same data. This may shift the IQR outlier list slightly. To revert
+        % to the old behaviour, use dispIsCorrect on the line below.
+        allOverallAcc(condIdx, p) = mean(fitIsCorrect);
+        allNSwitches(condIdx, p)  = sum(diff(thisBlockSource) ~= 0) + 1;
+
+        for n = 1:dispMaxX
+            allRawAcc(condIdx, p, n) = mean(dispIsCorrect(dispFramesSince == n));
+        end
+
+        fitData = [ones(nTrialsKept, 1), fitFramesSince, fitIsCorrect];
         allTrialData{condIdx, p} = [allTrialData{condIdx, p}; fitData];
     end
 end
@@ -186,9 +220,14 @@ for condIdx = 1:nConditions
             maxSlopePerSec = ((beta1 * range) / 4) / frameRate;
             yMid = (lowerAsy + upperAsy) / 2;
             if midpointSeconds > 0 && midpointSeconds < 30
-                tX = [midpointSeconds - 1, midpointSeconds + 1];
-                tY = maxSlopePerSec * (tX - midpointSeconds) + yMid;
-                plot(tX, tY, 'b-', 'LineWidth', 3);
+                halfLen = 1;
+                if maxSlopePerSec ~= 0
+                    halfLen = min(halfLen, ...
+                        min(1 - yMid, yMid) / abs(maxSlopePerSec));
+                end
+                tX = [midpointSeconds - halfLen, midpointSeconds + halfLen];
+                tY = maxSlopePerSec * (tX - midpointSeconds) + yMid;   % no clamp needed
+                plot(tX, tY, 'b-', 'LineWidth', 4);
                 plot(midpointSeconds, yMid, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 10);
             end
 
@@ -240,7 +279,7 @@ end
 %     group rise down slightly instead of corrupting the asymptote average.
 
 excludeRawAccOutliers       = true;   % keeps your existing IQR rule; false = literally everyone
-useMedianAcrossParticipants = false;  % true = median (still uses all participants, just robust)
+useMedianAcrossParticipants = true;  % true = median (still uses all participants, just robust)
 minParticipantsForGroup     = 2;
 flatRiseThreshold           = 0.02;   % DIAGNOSTIC ONLY -- nothing is removed
 alsoFitPooledForComparison  = false;  % true = overlay old pooled fit in magenta
@@ -323,7 +362,7 @@ for condIdx = 1:nConditions
         isNeg    = (b1 < 0);
         isFlat   = (abs(predRise) < flatRiseThreshold);
 
-        tol       = 1e-4 * max(1, thisMaxX);
+        tol = max(0.5, 1e-3 * thisMaxX);   % in frames; old 1e-4*maxX missed P002/P004
         atLowBnd  = (mid - lowerMid) <  tol;
         atHighBnd = (upperMid - mid) <  tol;
 
@@ -393,6 +432,13 @@ for condIdx = 1:nConditions
     predMatrix  = [ones(numFrames, 1), (1:numFrames)'];
     smoothedAcc = logist_valLU2(groupFitsAvg, predMatrix);
 
+    % widest fit window among contributing participants (for marking extrapolation)
+    condFitMaxFrames = 0;
+    for k = 1:nUsed
+        condFitMaxFrames = max(condFitMaxFrames, max(allTrialData{condIdx, usedP(k)}(:,2)));
+    end
+    fitEdgeSec = condFitMaxFrames * frameRate;
+
     midpointSec    = mMid * frameRate;
     groupRange     = groupUpperAsy - groupLowerAsy;
     maxSlopePerSec = ((groupBeta1 * groupRange) / 4) / frameRate;
@@ -436,15 +482,27 @@ for condIdx = 1:nConditions
     end
 
     plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
-    plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
+    inFit = plotTimeSeconds <= fitEdgeSec;
+    sm    = smoothedAcc(:)';
+    plot(plotTimeSeconds(inFit),  sm(inFit),  'r-', 'LineWidth', 5);   % fitted range
+    plot(plotTimeSeconds(~inFit), sm(~inFit), 'r:', 'LineWidth', 3);   % extrapolation
+    if fitEdgeSec < plotTimeSeconds(end)
+        xline(fitEdgeSec, ':', 'Color', [0.3 0.3 0.3], 'LineWidth', 2);
+        text(fitEdgeSec + 0.3, 0.06, 'fit window edge', 'FontSize', 14, 'Color', [0.3 0.3 0.3]);
+    end
 
     yline(groupEffAcc, '--k', 'LineWidth', 2.5);
     text(28, groupEffAcc - 0.05, sprintf('Asy: %.2f', groupEffAcc), ...
         'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
 
     if midpointSec > 0 && midpointSec < 30
-        tX = [midpointSec - 1.5, midpointSec + 1.5];
-        tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
+        halfLen = 1.5;
+        if maxSlopePerSec ~= 0
+            halfLen = min(halfLen, ...
+                min(1 - yMidGroup, yMidGroup) / abs(maxSlopePerSec));
+        end
+        tX = [midpointSec - halfLen, midpointSec + halfLen];
+        tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;   % no clamp needed
         plot(tX, tY, 'b-', 'LineWidth', 4);
         plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
         text(midpointSec + 0.5, yMidGroup - 0.08, sprintf('Slope: %.2f acc/sec', maxSlopePerSec), ...

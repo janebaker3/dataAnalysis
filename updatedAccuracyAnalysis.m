@@ -36,9 +36,6 @@ for p = 1:length(participantIDs)
     % Load behavioral data for the current participant
     load(['/Users/janebaker/Desktop/triangles/taskData/finalData/p' pidStr '.mat']);
 
-    k = [data.keyPressed];
-    fprintf('unique keys: %s | n non-FJ = %d of %d\n', mat2str(unique(k)), sum(k~='F' & k~='J'), numel(k));
-
     % Extract unique block numbers and map them for filtering
     blocks = unique([data.blockNumber]);
     blockNum = [data.blockNumber];
@@ -261,15 +258,21 @@ for condIdx = 1:nConditions
     yMidGroup = (avgLowerAsy + avgEffAcc) / 2;
 
     f = figure;
+    hold on;
+    % Plot each individual participant's raw accuracy faintly in the background
+    % (all the same color) to show variability
+    for p = 1:length(participantIDs)
+        indivAcc = squeeze(allRawAcc(condIdx, p, 1:numFrames));
+        plot(plotTimeSeconds, indivAcc, 'Color', [0.75 0.75 0.75], 'LineWidth', 1);
+    end
     % Plot Group Raw Data background line
     plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
-    hold on;
     % Plot Group Fit Line
     plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
     
     % Plot horizontal line for the upper asymptote (effective maximum accuracy)
     yline(avgEffAcc, '--k', 'LineWidth', 2.5);
-    text(28, avgEffAcc - 0.05, sprintf('Asy: %.2f', avgEffAcc), ...
+    text(14.5, avgEffAcc - 0.05, sprintf('Asy: %.2f', avgEffAcc), ...
         'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
     
     % Midpoint / Slope representation
@@ -291,7 +294,7 @@ for condIdx = 1:nConditions
     ax.LineWidth = 3;          % Bold axis lines
     ax.TickLength = [0.02 0.02];
     
-    xlim([0 30]);              % Requested X limit
+    xlim([0 15]);              % X limit (max 15 seconds)
     ylim([0 1]);               % Constrain Y-axis to 0-100% accuracy range
     grid on;
     

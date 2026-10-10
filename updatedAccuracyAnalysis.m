@@ -28,6 +28,10 @@ allRawAcc = NaN(nConditions, length(participantIDs), maxFramesPossible);
 allActualVals = NaN(nConditions, length(participantIDs), 2);
 
 %% --- Individual Participant Loop ---
+% Minimum number of data points (beliefs/epochs) required at a given
+% "frames since switch" value for that value to be used in fitting
+minPoints = 4;
+
 % Iterate over each specified participant to extract data and fit logistic models
 for p = 1:length(participantIDs)
     pid = participantIDs(p);
@@ -88,15 +92,28 @@ for p = 1:length(participantIDs)
             end
         end
         
-        % Calculate and store the mean raw accuracy for every frame interval
-        maxX = max(trialFramesSince);
+        % Determine the last "frames since switch" value that still has at least
+        % minPoints data points (i.e. at least minPoints beliefs lasted that long).
+        % Counts can only decrease as frames-since-switch increases, so everything
+        % beyond this point has fewer than minPoints data points and is cut.
+        framesCounts = accumarray(trialFramesSince, 1);
+        maxX = find(framesCounts >= minPoints, 1, 'last');
+        if isempty(maxX)
+            fprintf('Skipping P%s Std %.3f H %.3f: no time point has >= %d data points\n', ...
+                pidStr, stdVal, hVal, minPoints);
+            continue;
+        end
+        
+        % Calculate and store the mean raw accuracy for every valid frame interval
         for n = 1:maxX
             allRawAcc(condIdx, p, n) = mean(trialIsCorrect(trialFramesSince == n));
         end
         
         % Logistic Fit
+        % Only use trials at or before the cutoff time point
+        keepIdx = trialFramesSince <= maxX;
         % Prepare matrix for logistic regression: [Intercept, Predictor(frames), Response(accuracy)]
-        fitData = [ones(nTrials, 1), trialFramesSince, trialIsCorrect];
+        fitData = [ones(sum(keepIdx), 1), trialFramesSince(keepIdx), trialIsCorrect(keepIdx)];
         try
             % Fit a 4-parameter logistic function with lower and upper bounds ('lu2')
             [fits, ~, ~, ~, ~] = logist_fit(fitData, 'lu2');
@@ -259,14 +276,19 @@ for condIdx = 1:nConditions
 
     f = figure;
     hold on;
-    % Plot each individual participant's raw accuracy faintly in the background
+    % Plot each individual participant's logistic fit faintly in the background
     % (all the same color) to show variability
     for p = 1:length(participantIDs)
-        indivAcc = squeeze(allRawAcc(condIdx, p, 1:numFrames));
-        plot(plotTimeSeconds, indivAcc, 'Color', [0.75 0.75 0.75], 'LineWidth', 1);
+        if isnan(allParams(condIdx, p, 1)), continue; end
+        indivFits = [allParams(condIdx, p, 1); ...
+                     allParams(condIdx, p, 2); ...
+                     allParams(condIdx, p, 3); ...
+                     1 - allParams(condIdx, p, 4)];
+        indivSmoothedAcc = logist_valLU2(indivFits, predMatrix);
+        plot(plotTimeSeconds, indivSmoothedAcc, 'Color', [0.7 0.5 0.5], 'LineWidth', 0.5);
     end
     % Plot Group Raw Data background line
-    plot(plotTimeSeconds, groupRawAcc, 'Color', [0.8 0.8 0.8], 'LineWidth', 1.5);
+    plot(plotTimeSeconds, groupRawAcc, 'Color', [0 0 0], 'LineWidth', 1.5);
     % Plot Group Fit Line
     plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
     

@@ -237,11 +237,11 @@ for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
-    % Calculate group means for each parameter, ignoring NaN values (failed fits)
-    avgBeta0    = nanmean(allParams(condIdx, :, 1));
-    avgBeta1    = nanmean(allParams(condIdx, :, 2));
-    avgLowerAsy = nanmean(allParams(condIdx, :, 3));
-    avgEffAcc   = nanmean(allParams(condIdx, :, 5)); 
+    % Calculate group medians for each parameter, ignoring NaN values (failed fits)
+    avgBeta0    = nanmedian(allParams(condIdx, :, 1));
+    avgBeta1    = nanmedian(allParams(condIdx, :, 2));
+    avgLowerAsy = nanmedian(allParams(condIdx, :, 3));
+    avgEffAcc   = nanmedian(allParams(condIdx, :, 5)); 
     
     % Skip if no valid parameters were generated for this condition
     if isnan(avgBeta0), continue; end

@@ -235,8 +235,7 @@ end
 % aggregate visualisations. Loop is over condition index (1-6), not raw block
 % number, since block order is randomized and no longer meaningful.
 
-% Criteria for excluding degenerate fits from the group average
-minSlope = 0.01;     % exclude fits with beta1 <= this (negative or ~flat)
+% Criterion for excluding bad fits from the group average
 maxMidSec = 15;      % exclude fits whose midpoint (t50) is outside 0 to this many seconds
 
 for condIdx = 1:nConditions
@@ -250,11 +249,11 @@ for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
-    % Identify non-degenerate fits for this condition (logical row vector over participants)
+    % Identify fits with a valid t50 for this condition (logical row vector over participants)
     thisB0 = allParams(condIdx, :, 1);
     thisB1 = allParams(condIdx, :, 2);
     thisT50 = (-thisB0 ./ thisB1) * 0.05;
-    validFit = ~isnan(thisB0) & (thisB1 > minSlope) & (thisT50 >= 0) & (thisT50 <= maxMidSec);
+    validFit = ~isnan(thisB0) & (thisT50 >= 0) & (thisT50 <= maxMidSec);
     fprintf('Cond %d: using %d of %d fits in group average\n', ...
         condIdx, sum(validFit), sum(~isnan(thisB0)));
     

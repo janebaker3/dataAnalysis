@@ -28,9 +28,9 @@ allRawAcc = NaN(nConditions, length(participantIDs), maxFramesPossible);
 allActualVals = NaN(nConditions, length(participantIDs), 2);
 
 %% --- Individual Participant Loop ---
-% Minimum number of data points (beliefs/epochs) required at a given
-% "frames since switch" value for that value to be used in fitting
-minPoints = 4;
+% Fixed maximum time (seconds since switch) used for fitting and plotting
+maxSeconds = 10;
+maxFrames = round(maxSeconds / 0.05);   % 200 frames at 20 Hz
 
 % Iterate over each specified participant to extract data and fit logistic models
 for p = 1:length(participantIDs)
@@ -92,19 +92,11 @@ for p = 1:length(participantIDs)
             end
         end
         
-        % Determine the last "frames since switch" value that still has at least
-        % minPoints data points (i.e. at least minPoints beliefs lasted that long).
-        % Counts can only decrease as frames-since-switch increases, so everything
-        % beyond this point has fewer than minPoints data points and is cut.
-        framesCounts = accumarray(trialFramesSince, 1);
-        maxX = find(framesCounts >= minPoints, 1, 'last');
-        if isempty(maxX)
-            fprintf('Skipping P%s Std %.3f H %.3f: no time point has >= %d data points\n', ...
-                pidStr, stdVal, hVal, minPoints);
-            continue;
-        end
+        % Cutoff is fixed at maxFrames (10 s) regardless of the data
+        maxX = maxFrames;
         
-        % Calculate and store the mean raw accuracy for every valid frame interval
+        % Calculate and store the mean raw accuracy for every frame interval up to the cutoff
+        % (frames with no data are NaN)
         for n = 1:maxX
             allRawAcc(condIdx, p, n) = mean(trialIsCorrect(trialFramesSince == n));
         end
@@ -245,30 +237,28 @@ for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
-    % Calculate group MEDIANS for each parameter, ignoring NaN values (failed fits)
-    avgBeta0    = nanmedian(allParams(condIdx, :, 1));
-    avgBeta1    = nanmedian(allParams(condIdx, :, 2));
-    avgLowerAsy = nanmedian(allParams(condIdx, :, 3));
-    avgEffAcc   = nanmedian(allParams(condIdx, :, 5)); 
+    % Calculate group means for each parameter, ignoring NaN values (failed fits)
+    avgBeta0    = nanmean(allParams(condIdx, :, 1));
+    avgBeta1    = nanmean(allParams(condIdx, :, 2));
+    avgLowerAsy = nanmean(allParams(condIdx, :, 3));
+    avgEffAcc   = nanmean(allParams(condIdx, :, 5)); 
     
     % Skip if no valid parameters were generated for this condition
     if isnan(avgBeta0), continue; end
     
-    % Reconstruct the group fits array for generating the group logistic line
+    % Reconstruct the average fits array for generating the group logistic line
     avgFits = [avgBeta0; avgBeta1; avgLowerAsy; (1 - avgEffAcc)];
     
-    % Calculate the group-average raw accuracy across valid frames
-    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, :), 2));
-    lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
-    groupRawAcc = groupRawAcc(1:lastValidIdx);
+    % Group-average raw accuracy over the fixed window (always maxFrames long = 10 s)
+    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, 1:maxFrames), 2));
     
-    % Generate coordinates for plotting the group model line
-    numFrames = length(groupRawAcc);
+    % Generate coordinates for plotting the averaged model line
+    numFrames = maxFrames;
     plotTimeSeconds = (1:numFrames) * 0.05;
     predMatrix = [ones(numFrames, 1), (1:numFrames)'];
     smoothedAcc = logist_valLU2(avgFits, predMatrix);
     
-    % Compute inflection point, max slope, and dynamic range for the group curve
+    % Compute inflection point, max slope, and dynamic range for the group average curve
     avgRange = avgEffAcc - avgLowerAsy;
     midpointSec = (-avgBeta0 / avgBeta1) * 0.05;
     maxSlopePerSec = ((avgBeta1 * avgRange) / 4) / 0.05;
@@ -285,16 +275,16 @@ for condIdx = 1:nConditions
                      allParams(condIdx, p, 3); ...
                      1 - allParams(condIdx, p, 4)];
         indivSmoothedAcc = logist_valLU2(indivFits, predMatrix);
-        plot(plotTimeSeconds, indivSmoothedAcc, 'Color', [0.7 0.5 0.5], 'LineWidth', 0.5);
+        plot(plotTimeSeconds, indivSmoothedAcc, 'Color', [0.9 0.5 0.5], 'LineWidth', 0.5);
     end
     % Plot Group Raw Data background line
-    plot(plotTimeSeconds, groupRawAcc, 'Color', [0 0 0], 'LineWidth', 1.5);
+    plot(plotTimeSeconds, groupRawAcc, 'Color', [0.6 0.6 0.6], 'LineWidth', 1.5);
     % Plot Group Fit Line
     plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
     
     % Plot horizontal line for the upper asymptote (effective maximum accuracy)
     yline(avgEffAcc, '--k', 'LineWidth', 2.5);
-    text(14.5, avgEffAcc - 0.05, sprintf('Asy: %.2f', avgEffAcc), ...
+    text(9.8, avgEffAcc - 0.05, sprintf('Asy: %.2f', avgEffAcc), ...
         'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
     
     % Midpoint / Slope representation
@@ -316,7 +306,7 @@ for condIdx = 1:nConditions
     ax.LineWidth = 3;          % Bold axis lines
     ax.TickLength = [0.02 0.02];
     
-    xlim([0 15]);              % X limit (max 15 seconds)
+    xlim([0 10]);              % X limit (max 15 seconds)
     ylim([0 1]);               % Constrain Y-axis to 0-100% accuracy range
     grid on;
     
@@ -352,65 +342,65 @@ condLabelsCell = cellstr(condLabels);
 legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
 
 %% --- Option 1: Grouped Bar Chart (one group per condition, one bar per participant) ---
-f = figure;
-bh = bar(accMatrix, 'grouped');
-
-% Assign distinct colors per participant for easy tracking across conditions
-cmap = lines(length(participantIDs));
-for i = 1:length(bh)
-    bh(i).FaceColor = cmap(i, :);
-end
-
-hold on;
-
-% Overlay the group mean per condition as a black marker for quick reference
-groupMeans = nanmean(accMatrix, 2);
-meanHandle = plot(1:nConditions, groupMeans, 'ko', 'MarkerFaceColor', 'k', ...
-    'MarkerSize', 10, 'LineWidth', 2);
-
-% --- Formatting ---
-ax = gca;
-ax.FontSize = 16;
-ax.LineWidth = 2;
-ax.XTick = 1:nConditions;
-ax.XTickLabel = condLabelsCell;
-ax.XTickLabelRotation = 0;
-ylim([0 1]);
-ylabel('Effective Accuracy', 'FontSize', 20, 'FontWeight', 'bold');
-xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
-title('Individual Participant Accuracy by Condition', 'FontSize', 24);
-grid on;
-
-legend([bh, meanHandle], [legendLabels, {'Group Mean'}], ...
-    'Location', 'eastoutside', 'FontSize', 12);
-
-% Save figure (commented out by default)
-% saveas(f, fullfile(figurePath, 'individual_accuracy_by_condition_bar.png'));
-
-%% --- Option 2: Heatmap (Participant x Condition) ---
-% Often better for outlier detection: a participant row that's a
-% consistently different color stands out, and a condition column that's
-% uniformly off stands out separately.
-f2 = figure;
-imagesc(accMatrix'); % transpose so rows = participants, columns = conditions
-colormap(parula);
-cb = colorbar;
-cb.Label.String = 'Effective Accuracy';
-cb.Label.FontSize = 16;
-cb.Label.FontWeight = 'bold';
-clim([0 1]);
-
-ax = gca;
-ax.FontSize = 14;
-ax.XTick = 1:nConditions;
-ax.XTickLabel = condLabelsCell;
-ax.XTickLabelRotation = 0;
-ax.YTick = 1:length(participantIDs);
-ax.YTickLabel = legendLabels;
-
-xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
-ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
-title('Heatmap of Effective Accuracy: Participant x Condition', 'FontSize', 24);
-
-% Save figure (commented out by default)
-% saveas(f2, fullfile(figurePath, 'heatmap_accuracy_participant_by_condition.png'));
+% f = figure;
+% bh = bar(accMatrix, 'grouped');
+% 
+% % Assign distinct colors per participant for easy tracking across conditions
+% cmap = lines(length(participantIDs));
+% for i = 1:length(bh)
+%     bh(i).FaceColor = cmap(i, :);
+% end
+% 
+% hold on;
+% 
+% % Overlay the group mean per condition as a black marker for quick reference
+% groupMeans = nanmean(accMatrix, 2);
+% meanHandle = plot(1:nConditions, groupMeans, 'ko', 'MarkerFaceColor', 'k', ...
+%     'MarkerSize', 10, 'LineWidth', 2);
+% 
+% % --- Formatting ---
+% ax = gca;
+% ax.FontSize = 16;
+% ax.LineWidth = 2;
+% ax.XTick = 1:nConditions;
+% ax.XTickLabel = condLabelsCell;
+% ax.XTickLabelRotation = 0;
+% ylim([0 1]);
+% ylabel('Effective Accuracy', 'FontSize', 20, 'FontWeight', 'bold');
+% xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
+% title('Individual Participant Accuracy by Condition', 'FontSize', 24);
+% grid on;
+% 
+% legend([bh, meanHandle], [legendLabels, {'Group Mean'}], ...
+%     'Location', 'eastoutside', 'FontSize', 12);
+% 
+% % Save figure (commented out by default)
+% % saveas(f, fullfile(figurePath, 'individual_accuracy_by_condition_bar.png'));
+% 
+% %% --- Option 2: Heatmap (Participant x Condition) ---
+% % Often better for outlier detection: a participant row that's a
+% % consistently different color stands out, and a condition column that's
+% % uniformly off stands out separately.
+% f2 = figure;
+% imagesc(accMatrix'); % transpose so rows = participants, columns = conditions
+% colormap(parula);
+% cb = colorbar;
+% cb.Label.String = 'Effective Accuracy';
+% cb.Label.FontSize = 16;
+% cb.Label.FontWeight = 'bold';
+% clim([0 1]);
+% 
+% ax = gca;
+% ax.FontSize = 14;
+% ax.XTick = 1:nConditions;
+% ax.XTickLabel = condLabelsCell;
+% ax.XTickLabelRotation = 0;
+% ax.YTick = 1:length(participantIDs);
+% ax.YTickLabel = legendLabels;
+% 
+% xlabel('Condition (Std / Hazard)', 'FontSize', 20, 'FontWeight', 'bold');
+% ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
+% title('Heatmap of Effective Accuracy: Participant x Condition', 'FontSize', 24);
+% 
+% % Save figure (commented out by default)
+% % saveas(f2, fullfile(figurePath, 'heatmap_accuracy_participant_by_condition.png'));

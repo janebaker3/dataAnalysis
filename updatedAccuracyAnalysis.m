@@ -234,10 +234,6 @@ end
 % Loop through conditions (std x hazard combinations) to create cross-participant
 % aggregate visualisations. Loop is over condition index (1-6), not raw block
 % number, since block order is randomized and no longer meaningful.
-
-% Criterion for excluding bad fits from the group average
-maxMidSec = 15;      % exclude fits whose midpoint (t50) is outside 0 to this many seconds
-
 for condIdx = 1:nConditions
     
     % Recover the std/hazard indices that this condition corresponds to
@@ -249,38 +245,30 @@ for condIdx = 1:nConditions
     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
     avgHVal = nanmean(allActualVals(condIdx, :, 2));
     
-    % Identify fits with a valid t50 for this condition (logical row vector over participants)
-    thisB0 = allParams(condIdx, :, 1);
-    thisB1 = allParams(condIdx, :, 2);
-    thisT50 = (-thisB0 ./ thisB1) * 0.05;
-    validFit = ~isnan(thisB0) & (thisT50 >= 0) & (thisT50 <= maxMidSec);
-    fprintf('Cond %d: using %d of %d fits in group average\n', ...
-        condIdx, sum(validFit), sum(~isnan(thisB0)));
-    
-    % Calculate group means for each parameter using only valid fits
-    avgBeta0    = nanmean(allParams(condIdx, validFit, 1));
-    avgBeta1    = nanmean(allParams(condIdx, validFit, 2));
-    avgLowerAsy = nanmean(allParams(condIdx, validFit, 3));
-    avgEffAcc   = nanmean(allParams(condIdx, validFit, 5)); 
+    % Calculate group MEDIANS for each parameter, ignoring NaN values (failed fits)
+    avgBeta0    = nanmedian(allParams(condIdx, :, 1));
+    avgBeta1    = nanmedian(allParams(condIdx, :, 2));
+    avgLowerAsy = nanmedian(allParams(condIdx, :, 3));
+    avgEffAcc   = nanmedian(allParams(condIdx, :, 5)); 
     
     % Skip if no valid parameters were generated for this condition
     if isnan(avgBeta0), continue; end
     
-    % Reconstruct the average fits array for generating the group logistic line
+    % Reconstruct the group fits array for generating the group logistic line
     avgFits = [avgBeta0; avgBeta1; avgLowerAsy; (1 - avgEffAcc)];
     
-    % Calculate the group-average raw accuracy across valid frames (valid fits only)
-    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, validFit, :), 2));
+    % Calculate the group-average raw accuracy across valid frames
+    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, :), 2));
     lastValidIdx = find(~isnan(groupRawAcc), 1, 'last');
     groupRawAcc = groupRawAcc(1:lastValidIdx);
     
-    % Generate coordinates for plotting the averaged model line
+    % Generate coordinates for plotting the group model line
     numFrames = length(groupRawAcc);
     plotTimeSeconds = (1:numFrames) * 0.05;
     predMatrix = [ones(numFrames, 1), (1:numFrames)'];
     smoothedAcc = logist_valLU2(avgFits, predMatrix);
     
-    % Compute inflection point, max slope, and dynamic range for the group average curve
+    % Compute inflection point, max slope, and dynamic range for the group curve
     avgRange = avgEffAcc - avgLowerAsy;
     midpointSec = (-avgBeta0 / avgBeta1) * 0.05;
     maxSlopePerSec = ((avgBeta1 * avgRange) / 4) / 0.05;
@@ -289,8 +277,7 @@ for condIdx = 1:nConditions
     f = figure;
     hold on;
     % Plot each individual participant's logistic fit faintly in the background
-    % (all the same color) to show variability. All fits are shown here,
-    % including the ones excluded from the average.
+    % (all the same color) to show variability
     for p = 1:length(participantIDs)
         if isnan(allParams(condIdx, p, 1)), continue; end
         indivFits = [allParams(condIdx, p, 1); ...

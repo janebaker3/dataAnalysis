@@ -223,123 +223,231 @@ for c = 1:nConditions
 end
 
 %% --- Generate Group Average Figures ---
-% Loop through conditions (std x hazard combinations) to create cross-participant
-% aggregate visualisations. Loop is over condition index (1-6), not raw block
-% number, since block order is randomized and no longer meaningful.
-for condIdx = 1:nConditions
-    
-    % Recover the std/hazard indices that this condition corresponds to
-    stdIdx = floor((condIdx - 1) / nHazard) + 1;
-    hIdx = mod(condIdx - 1, nHazard) + 1;
-    
-    % Recover the actual std/hazard values (averaged across participants, should
-    % be consistent within a condition, but averaged for safety)
-    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
-    avgHVal = nanmean(allActualVals(condIdx, :, 2));
-    
-    % Calculate group medians for each parameter, ignoring NaN values (failed fits)
-    avgBeta0    = nanmedian(allParams(condIdx, :, 1));
-    avgBeta1    = nanmedian(allParams(condIdx, :, 2));
-    avgLowerAsy = nanmedian(allParams(condIdx, :, 3));
-    avgEffAcc   = nanmedian(allParams(condIdx, :, 5)); 
-    
-    % Skip if no valid parameters were generated for this condition
-    if isnan(avgBeta0), continue; end
-    
-    % Reconstruct the average fits array for generating the group logistic line
-    avgFits = [avgBeta0; avgBeta1; avgLowerAsy; (1 - avgEffAcc)];
-    
-    % Group-average raw accuracy over the fixed window (always maxFrames long = 10 s)
-    groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, 1:maxFrames), 2));
-    
-    % Generate coordinates for plotting the averaged model line
-    numFrames = maxFrames;
-    plotTimeSeconds = (1:numFrames) * 0.05;
-    predMatrix = [ones(numFrames, 1), (1:numFrames)'];
-    smoothedAcc = logist_valLU2(avgFits, predMatrix);
-    
-    % Compute inflection point, max slope, and dynamic range for the group average curve
-    avgRange = avgEffAcc - avgLowerAsy;
-    midpointSec = (-avgBeta0 / avgBeta1) * 0.05;
-    maxSlopePerSec = ((avgBeta1 * avgRange) / 4) / 0.05;
-    yMidGroup = (avgLowerAsy + avgEffAcc) / 2;
-
-    f = figure;
-    hold on;
-    % Plot each individual participant's logistic fit faintly in the background
-    % (all the same color) to show variability
-    for p = 1:length(participantIDs)
-        if isnan(allParams(condIdx, p, 1)), continue; end
-        indivFits = [allParams(condIdx, p, 1); ...
-                     allParams(condIdx, p, 2); ...
-                     allParams(condIdx, p, 3); ...
-                     1 - allParams(condIdx, p, 4)];
-        indivSmoothedAcc = logist_valLU2(indivFits, predMatrix);
-        plot(plotTimeSeconds, indivSmoothedAcc, 'Color', [0.9 0.5 0.5], 'LineWidth', 0.5);
-    end
-    % Plot Group Raw Data background line
-    plot(plotTimeSeconds, groupRawAcc, 'Color', [0.6 0.6 0.6], 'LineWidth', 1.5);
-    % Plot Group Fit Line
-    plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
-    
-    % Plot horizontal line for the upper asymptote (effective maximum accuracy)
-    yline(avgEffAcc, '--k', 'LineWidth', 2.5);
-    text(9.8, avgEffAcc - 0.05, sprintf('Asy: %.2f', avgEffAcc), ...
-        'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
-    
-    % Midpoint / Slope representation
-    if midpointSec > 0 && midpointSec < 30
-        % Draw the tangent line at the inflection point to show maximum learning rate
-        tX = [midpointSec - 1.5, midpointSec + 1.5];
-        tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
-        plot(tX, tY, 'b-', 'LineWidth', 4);
-        
-        % Mark the midpoint and display the slope value
-        plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
-        text(midpointSec + 0.5, yMidGroup - 0.08, sprintf('Slope: %.2f acc/sec', maxSlopePerSec), ...
-            'Color', 'b', 'FontWeight', 'bold', 'FontSize', 20);
-    end
-
-    % --- Poster Formatting (Maximum Legibility) ---
-    ax = gca;
-    ax.FontSize = 24;          % Larger ticks for group plot
-    ax.LineWidth = 3;          % Bold axis lines
-    ax.TickLength = [0.02 0.02];
-    
-    xlim([0 10]);              % X limit (max 15 seconds)
-    ylim([0 1]);               % Constrain Y-axis to 0-100% accuracy range
-    grid on;
-    
-    xlabel('Seconds Since Source Switch', 'FontSize', 30, 'FontWeight', 'bold');
-    ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
-    
-    % Title using actual std/hazard values
-    title(sprintf('Std %.3f, Hazard %.3f', avgStdVal, avgHVal), 'FontSize', 36)
-    
-    % Save as PDF (Commented out by default)
-    % saveas(f, fullfile(figurePath, sprintf('POSTER_Average_Std%d_H%d.png', stdIdx, hIdx)));
-end
+% % Loop through conditions (std x hazard combinations) to create cross-participant
+% % aggregate visualisations. Loop is over condition index (1-6), not raw block
+% % number, since block order is randomized and no longer meaningful.
+% for condIdx = 1:nConditions
+% 
+%     % Recover the std/hazard indices that this condition corresponds to
+%     stdIdx = floor((condIdx - 1) / nHazard) + 1;
+%     hIdx = mod(condIdx - 1, nHazard) + 1;
+% 
+%     % Recover the actual std/hazard values (averaged across participants, should
+%     % be consistent within a condition, but averaged for safety)
+%     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+%     avgHVal = nanmean(allActualVals(condIdx, :, 2));
+% 
+%     % Calculate group medians for each parameter, ignoring NaN values (failed fits)
+%     avgBeta0    = nanmedian(allParams(condIdx, :, 1));
+%     avgBeta1    = nanmedian(allParams(condIdx, :, 2));
+%     avgLowerAsy = nanmedian(allParams(condIdx, :, 3));
+%     avgEffAcc   = nanmedian(allParams(condIdx, :, 5)); 
+% 
+%     % Skip if no valid parameters were generated for this condition
+%     if isnan(avgBeta0), continue; end
+% 
+%     % Reconstruct the average fits array for generating the group logistic line
+%     avgFits = [avgBeta0; avgBeta1; avgLowerAsy; (1 - avgEffAcc)];
+% 
+%     % Group-average raw accuracy over the fixed window (always maxFrames long = 10 s)
+%     groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, :, 1:maxFrames), 2));
+% 
+%     % Generate coordinates for plotting the averaged model line
+%     numFrames = maxFrames;
+%     plotTimeSeconds = (1:numFrames) * 0.05;
+%     predMatrix = [ones(numFrames, 1), (1:numFrames)'];
+%     smoothedAcc = logist_valLU2(avgFits, predMatrix);
+% 
+%     % Compute inflection point, max slope, and dynamic range for the group average curve
+%     avgRange = avgEffAcc - avgLowerAsy;
+%     midpointSec = (-avgBeta0 / avgBeta1) * 0.05;
+%     maxSlopePerSec = ((avgBeta1 * avgRange) / 4) / 0.05;
+%     yMidGroup = (avgLowerAsy + avgEffAcc) / 2;
+% 
+%     f = figure;
+%     hold on;
+%     % Plot each individual participant's logistic fit faintly in the background
+%     % (all the same color) to show variability
+%     for p = 1:length(participantIDs)
+%         if isnan(allParams(condIdx, p, 1)), continue; end
+%         indivFits = [allParams(condIdx, p, 1); ...
+%                      allParams(condIdx, p, 2); ...
+%                      allParams(condIdx, p, 3); ...
+%                      1 - allParams(condIdx, p, 4)];
+%         indivSmoothedAcc = logist_valLU2(indivFits, predMatrix);
+%         plot(plotTimeSeconds, indivSmoothedAcc, 'Color', [0.9 0.5 0.5], 'LineWidth', 0.5);
+%     end
+%     % Plot Group Raw Data background line
+%     plot(plotTimeSeconds, groupRawAcc, 'Color', [0.6 0.6 0.6], 'LineWidth', 1.5);
+%     % Plot Group Fit Line
+%     plot(plotTimeSeconds, smoothedAcc, 'r-', 'LineWidth', 5);
+% 
+%     % Plot horizontal line for the upper asymptote (effective maximum accuracy)
+%     yline(avgEffAcc, '--k', 'LineWidth', 2.5);
+%     text(9.8, avgEffAcc - 0.05, sprintf('Asy: %.2f', avgEffAcc), ...
+%         'FontWeight', 'bold', 'FontSize', 22, 'HorizontalAlignment', 'right');
+% 
+%     % Midpoint / Slope representation
+%     if midpointSec > 0 && midpointSec < 30
+%         % Draw the tangent line at the inflection point to show maximum learning rate
+%         tX = [midpointSec - 1.5, midpointSec + 1.5];
+%         tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
+%         plot(tX, tY, 'b-', 'LineWidth', 4);
+% 
+%         % Mark the midpoint and display the slope value
+%         plot(midpointSec, yMidGroup, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 12);
+%         text(midpointSec + 0.5, yMidGroup - 0.08, sprintf('Slope: %.2f acc/sec', maxSlopePerSec), ...
+%             'Color', 'b', 'FontWeight', 'bold', 'FontSize', 20);
+%     end
+% 
+%     % --- Poster Formatting (Maximum Legibility) ---
+%     ax = gca;
+%     ax.FontSize = 24;          % Larger ticks for group plot
+%     ax.LineWidth = 3;          % Bold axis lines
+%     ax.TickLength = [0.02 0.02];
+% 
+%     xlim([0 10]);              % X limit (max 15 seconds)
+%     ylim([0 1]);               % Constrain Y-axis to 0-100% accuracy range
+%     grid on;
+% 
+%     xlabel('Seconds Since Source Switch', 'FontSize', 30, 'FontWeight', 'bold');
+%     ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
+% 
+%     % Title using actual std/hazard values
+%     title(sprintf('Std %.3f, Hazard %.3f', avgStdVal, avgHVal), 'FontSize', 36)
+% 
+%     % Save as PDF (Commented out by default)
+%     % saveas(f, fullfile(figurePath, sprintf('POSTER_Average_Std%d_H%d.png', stdIdx, hIdx)));
+% end
 
 %% --- Individual Participant Accuracy Comparison (Outlier Check) ---
-% Visualize each participant's effective accuracy across all std/hazard
-% conditions to help identify any outlier participants or conditions.
+% % Visualize each participant's effective accuracy across all std/hazard
+% % conditions to help identify any outlier participants or conditions.
+% 
+% % Extract effective accuracy for all participants and conditions
+% % Rows = conditions, Columns = participants
+% accMatrix = squeeze(allParams(:, :, 5)); % [nConditions x nParticipants]
+% 
+% % Build condition labels using the actual std/hazard values (averaged
+% % across participants, should be consistent within a condition)
+% condLabels = strings(nConditions, 1);
+% for condIdx = 1:nConditions
+%     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+%     avgHVal = nanmean(allActualVals(condIdx, :, 2));
+%     condLabels(condIdx) = sprintf('Std %.3f\nH %.3f', avgStdVal, avgHVal);
+% end
+% condLabelsCell = cellstr(condLabels);
+% 
+% % Build legend labels for each participant (P001, P002, ...)
+% legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
 
-% Extract effective accuracy for all participants and conditions
-% Rows = conditions, Columns = participants
-accMatrix = squeeze(allParams(:, :, 5)); % [nConditions x nParticipants]
+%% --- Group Fits by Global Strategy (per condition) ---
+S = load('/Users/janebaker/Desktop/triangles/taskData/globalStrategies.mat');
+strategyMatrix = S.strategyMatrix;   % [nConditions x nParticipants], 1=Low, 2=Moderate, 3=High, NaN=excluded
+assert(isequal(S.strategyParticipantIDs(:), participantIDs(:)), ...
+    'Participant order differs between strategy and accuracy scripts');
+assert(size(strategyMatrix,1) == nConditions, 'strategyMatrix rows must equal nConditions');
 
-% Build condition labels using the actual std/hazard values (averaged
-% across participants, should be consistent within a condition)
-condLabels = strings(nConditions, 1);
+nStrategies = 3;
+stratShort  = {'Low', 'Moderate', 'High'};
+stratColors = [0.20 0.55 0.85; 0.90 0.60 0.10; 0.75 0.10 0.15];  % same as heatmap
+
+showIndiv  = true;    % faint individual participant fits
+showRaw    = false;   % faint raw accuracy per strategy (noisy)
+maxTangentRise = 0.15; % tangent never rises/falls more than this (accuracy units)
+
+plotTimeSeconds = (1:maxFrames) * 0.05;
+predMatrix = [ones(maxFrames, 1), (1:maxFrames)'];
+
 for condIdx = 1:nConditions
-    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
-    avgHVal = nanmean(allActualVals(condIdx, :, 2));
-    condLabels(condIdx) = sprintf('Std %.3f\nH %.3f', avgStdVal, avgHVal);
-end
-condLabelsCell = cellstr(condLabels);
 
-% Build legend labels for each participant (P001, P002, ...)
-legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal   = nanmean(allActualVals(condIdx, :, 2));
+
+    % ---- Compute group parameters for each strategy ----
+    idxS = cell(nStrategies, 1);
+    P    = NaN(nStrategies, 4);   % [beta0 beta1 lowerAsy effAcc]
+    for s = 1:nStrategies
+        idxS{s} = find(strategyMatrix(condIdx, :) == s & ~isnan(allParams(condIdx, :, 1)));
+        if isempty(idxS{s}), continue; end
+        P(s,:) = [median(allParams(condIdx, idxS{s}, 1), 'omitnan'), ...
+                  median(allParams(condIdx, idxS{s}, 2), 'omitnan'), ...
+                  median(allParams(condIdx, idxS{s}, 3), 'omitnan'), ...
+                  median(allParams(condIdx, idxS{s}, 5), 'omitnan')]; %%%%
+    end
+
+    f = figure('Position', [100 100 1400 800]);
+    hold on;
+
+    % ---- Pass 1: faint background lines (so bold fits always sit on top) ----
+    for s = 1:nStrategies
+        if isempty(idxS{s}), continue; end
+        colFade = 0.5 * stratColors(s,:) + 0.5;
+        if showIndiv
+            for p = idxS{s}
+                indivFits = [allParams(condIdx, p, 1); allParams(condIdx, p, 2); ...
+                             allParams(condIdx, p, 3); 1 - allParams(condIdx, p, 4)];
+                plot(plotTimeSeconds, logist_valLU2(indivFits, predMatrix), ...
+                    'Color', colFade, 'LineWidth', 0.5);
+            end
+        end
+        if showRaw
+            groupRawAcc = squeeze(nanmean(allRawAcc(condIdx, idxS{s}, 1:maxFrames), 2));
+            plot(plotTimeSeconds, groupRawAcc, 'Color', colFade, 'LineWidth', 1);
+        end
+    end
+
+    % ---- Pass 2: asymptotes, group fits, tangents ----
+    legH = []; legL = {};
+    for s = 1:nStrategies
+        if isempty(idxS{s}), continue; end
+        col = stratColors(s,:);
+        avgBeta0 = P(s,1); avgBeta1 = P(s,2); avgLowerAsy = P(s,3); avgEffAcc = P(s,4);
+
+        avgFits     = [avgBeta0; avgBeta1; avgLowerAsy; (1 - avgEffAcc)];
+        smoothedAcc = logist_valLU2(avgFits, predMatrix);
+
+        avgRange       = avgEffAcc - avgLowerAsy;
+        midpointSec    = (-avgBeta0 / avgBeta1) * 0.05;
+        maxSlopePerSec = ((avgBeta1 * avgRange) / 4) / 0.05;
+        yMidGroup      = (avgLowerAsy + avgEffAcc) / 2;
+
+        yline(avgEffAcc, '--', 'Color', col, 'LineWidth', 1.5, 'HandleVisibility', 'off');
+
+        h = plot(plotTimeSeconds, smoothedAcc, '-', 'Color', col, 'LineWidth', 5);
+
+        if midpointSec > 0 && midpointSec < 30
+            % Cap tangent length so steep slopes don't dominate the plot
+            dx = min(1.5, maxTangentRise / max(abs(maxSlopePerSec), eps));
+            tX = [midpointSec - dx, midpointSec + dx];
+            tY = maxSlopePerSec * (tX - midpointSec) + yMidGroup;
+            plot(tX, tY, '-', 'Color', col * 0.6, 'LineWidth', 3, 'HandleVisibility', 'off');
+            plot(midpointSec, yMidGroup, 'o', 'MarkerFaceColor', col * 0.6, ...
+                'MarkerEdgeColor', 'w', 'MarkerSize', 12, 'HandleVisibility', 'off');
+        end
+
+        legH(end+1) = h; %#ok<SAGROW>
+        legL{end+1} = sprintf('%s (n=%d)\nAsy: %.2f\nSlope: %.2f acc/s', ...
+            stratShort{s}, numel(idxS{s}), avgEffAcc, maxSlopePerSec); %#ok<SAGROW>
+    end
+
+    % --- Poster Formatting ---
+    ax = gca;
+    ax.FontSize = 24;
+    ax.LineWidth = 3;
+    ax.TickLength = [0.02 0.02];
+    xlim([0 10]);
+    ylim([0 1]);
+    grid on;
+    xlabel('Seconds Since Source Switch', 'FontSize', 30, 'FontWeight', 'bold');
+    ylabel('Accuracy', 'FontSize', 30, 'FontWeight', 'bold');
+    title({sprintf('Std %g, Hazard %g', avgStdVal, avgHVal), 'By Global Strategy'}, 'FontSize', 28);
+    if ~isempty(legH)
+        legend(legH, legL, 'Location', 'eastoutside', 'FontSize', 20, 'Box', 'off');
+    end
+
+    % saveas(f, fullfile(figurePath, sprintf('Strategy_Fits_Cond%d.png', condIdx)));
+end
 
 %% --- Option 1: Grouped Bar Chart (one group per condition, one bar per participant) ---
 % f = figure;

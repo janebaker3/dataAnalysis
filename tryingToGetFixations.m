@@ -446,7 +446,18 @@ xlabel('Condition', 'FontSize', 20, 'FontWeight', 'bold');
 ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
 title('Central Fixation Category by Participant x Condition', 'FontSize', 24, 'FontWeight', 'bold');
 
+%% --- 2i. EXPORT GLOBAL STRATEGY LABELS FOR ACCURACY SCRIPT ---
+% strategyMatrix(c,p) = 1 (Low), 2 (Moderate), 3 (High) central fixation, NaN = excluded/invalid
+% Rows = condIdx = (stdHrzIdx-1)*2 + hazardIdx ; Columns = participantIDs order
+strategyMatrix         = centralFixCategory;
+strategyParticipantIDs = participantIDs;
+strategyCondLabels     = condLabels;
+strategyNames          = centralFixLabels;
 
+strategySavePath = '/Users/janebaker/Desktop/triangles/taskData/globalStrategies.mat';
+save(strategySavePath, 'strategyMatrix', 'strategyParticipantIDs', ...
+     'strategyCondLabels', 'strategyNames');
+fprintf('\nSaved global strategy labels to %s\n', strategySavePath);
 
 %% --- 3. LOCAL STRATEGIES PLOT (GROUPED BY STRATEGY) ---
 % *** COMMENTED OUT: strategy assignments (stratAssignment) are currently
@@ -619,58 +630,58 @@ for p = 1:numParticipants
 end
 
 %% --- 4c. GLOBAL STRATEGIES BAR CHART (Group Average Across Participants, per Condition) ---
-% % One figure. X-axis = condition, with 3 grouped bars per condition
-% % representing the AVERAGE Same / Opposite / Middle fixation proportions
-% % across all valid participants, with SEM error bars.
-% 
-% groupBarData = nan(numConditions, 3); % columns: Same, Opposite, Middle (mean)
-% groupErrData = nan(numConditions, 3); % columns: Same, Opposite, Middle (SEM)
-% 
-% for c = 1:numConditions
-%     validMask = validEyeData(c, :) & ~isnan(oppProportion(c, :)) & ~isnan(sameProportion(c, :));
-% 
-%     sVals = sameProportion(c, validMask);
-%     oVals = oppProportion(c, validMask);
-%     mVals = 1 - sVals - oVals;
-% 
-%     nValidC = sum(validMask);
-%     if nValidC > 0
-%         groupBarData(c, :) = [mean(sVals), mean(oVals), mean(mVals)];
-%         if nValidC > 1
-%             groupErrData(c, :) = [std(sVals)/sqrt(nValidC), std(oVals)/sqrt(nValidC), std(mVals)/sqrt(nValidC)];
-%         else
-%             groupErrData(c, :) = [0, 0, 0];
-%         end
-%     end
-% end
-% 
-% figAvg = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
-% 
-% b = bar(groupBarData, 'grouped');
-% b(1).FaceColor = [0.20 0.55 0.85]; % Same
-% b(2).FaceColor = [0.85 0.30 0.25]; % Opposite
-% b(3).FaceColor = [0.60 0.60 0.60]; % Middle
-% b(1).EdgeColor = 'k'; b(2).EdgeColor = 'k'; b(3).EdgeColor = 'k';
-% b(1).LineWidth = 1.5; b(2).LineWidth = 1.5; b(3).LineWidth = 1.5;
-% 
-% % Add error bars: compute x-positions of each bar within each group
-% numBarsPerGroup = size(groupBarData, 2);
-% groupWidth = min(0.8, numBarsPerGroup / (numBarsPerGroup + 1.5));
-% for i = 1:numBarsPerGroup
-%     xPos = (1:numConditions) - groupWidth/2 + (2*i-1) * groupWidth / (2*numBarsPerGroup);
-%     errorbar(xPos, groupBarData(:, i), groupErrData(:, i), 'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 12);
-% end
-% 
-% set(gca, 'FontSize', 24, 'LineWidth', 2, 'TickDir', 'out');
-% set(gca, 'XTick', 1:numConditions, 'XTickLabel', condLabels, 'XTickLabelRotation', 20);
-% ylabel('Fixation Proportion', 'FontSize', 32, 'FontWeight', 'bold');
-% xlabel('Condition', 'FontSize', 32, 'FontWeight', 'bold');
-% ylim([0 1]);
-% title('Group Average Global Viewing Strategy (±SEM)', 'FontSize', 40, 'FontWeight', 'bold');
-% legend(b, {'Same', 'Opposite', 'Middle'}, 'FontSize', 22, 'Location', 'bestoutside');
-% grid on;
-% 
-% % saveas(figAvg, fullfile(figurePath, 'GroupAvg_Global_Strategy_Bar.png'));
+% One figure. X-axis = condition, with 3 grouped bars per condition
+% representing the AVERAGE Same / Opposite / Middle fixation proportions
+% across all valid participants, with SEM error bars.
+
+groupBarData = nan(numConditions, 3); % columns: Same, Opposite, Middle (mean)
+groupErrData = nan(numConditions, 3); % columns: Same, Opposite, Middle (SEM)
+
+for c = 1:numConditions
+    validMask = validEyeData(c, :) & ~isnan(oppProportion(c, :)) & ~isnan(sameProportion(c, :));
+
+    sVals = sameProportion(c, validMask);
+    oVals = oppProportion(c, validMask);
+    mVals = 1 - sVals - oVals;
+
+    nValidC = sum(validMask);
+    if nValidC > 0
+        groupBarData(c, :) = [mean(sVals), mean(oVals), mean(mVals)];
+        if nValidC > 1
+            groupErrData(c, :) = [std(sVals)/sqrt(nValidC), std(oVals)/sqrt(nValidC), std(mVals)/sqrt(nValidC)];
+        else
+            groupErrData(c, :) = [0, 0, 0];
+        end
+    end
+end
+
+figAvg = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
+
+b = bar(groupBarData, 'grouped');
+b(1).FaceColor = [0.20 0.55 0.85]; % Same
+b(2).FaceColor = [0.85 0.30 0.25]; % Opposite
+b(3).FaceColor = [0.60 0.60 0.60]; % Middle
+b(1).EdgeColor = 'k'; b(2).EdgeColor = 'k'; b(3).EdgeColor = 'k';
+b(1).LineWidth = 1.5; b(2).LineWidth = 1.5; b(3).LineWidth = 1.5;
+
+% Add error bars: compute x-positions of each bar within each group
+numBarsPerGroup = size(groupBarData, 2);
+groupWidth = min(0.8, numBarsPerGroup / (numBarsPerGroup + 1.5));
+for i = 1:numBarsPerGroup
+    xPos = (1:numConditions) - groupWidth/2 + (2*i-1) * groupWidth / (2*numBarsPerGroup);
+    errorbar(xPos, groupBarData(:, i), groupErrData(:, i), 'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 12);
+end
+
+set(gca, 'FontSize', 24, 'LineWidth', 2, 'TickDir', 'out');
+set(gca, 'XTick', 1:numConditions, 'XTickLabel', condLabels, 'XTickLabelRotation', 20);
+ylabel('Fixation Proportion', 'FontSize', 32, 'FontWeight', 'bold');
+xlabel('Condition', 'FontSize', 32, 'FontWeight', 'bold');
+ylim([0 1]);
+title('Group Average Global Viewing Strategy (±SEM)', 'FontSize', 40, 'FontWeight', 'bold');
+legend(b, {'Same', 'Opposite', 'Middle'}, 'FontSize', 22, 'Location', 'bestoutside');
+grid on;
+
+% saveas(figAvg, fullfile(figurePath, 'GroupAvg_Global_Strategy_Bar.png'));
 
 %% --- 5. LOCAL STRATEGIES PLOT (INDIVIDUAL PARTICIPANTS) ---
 % *** COMMENTED OUT per request. Uncomment to inspect each participant's

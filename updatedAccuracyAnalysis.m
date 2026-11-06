@@ -1,6 +1,6 @@
 %% --- Environment Setup ---
 % Define the participants to include in the analysis
-participantIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+participantIDs = 1:31;%[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 % Define paths for saving figures and locating necessary analysis toolboxes
 figurePath = '/Users/janebaker/Desktop/triangles/taskData/figures';
@@ -320,26 +320,26 @@ end
 %     % saveas(f, fullfile(figurePath, sprintf('POSTER_Average_Std%d_H%d.png', stdIdx, hIdx)));
 % end
 
-%% --- Individual Participant Accuracy Comparison (Outlier Check) ---
-% % Visualize each participant's effective accuracy across all std/hazard
-% % conditions to help identify any outlier participants or conditions.
-% 
-% % Extract effective accuracy for all participants and conditions
-% % Rows = conditions, Columns = participants
-% accMatrix = squeeze(allParams(:, :, 5)); % [nConditions x nParticipants]
-% 
-% % Build condition labels using the actual std/hazard values (averaged
-% % across participants, should be consistent within a condition)
-% condLabels = strings(nConditions, 1);
-% for condIdx = 1:nConditions
-%     avgStdVal = nanmean(allActualVals(condIdx, :, 1));
-%     avgHVal = nanmean(allActualVals(condIdx, :, 2));
-%     condLabels(condIdx) = sprintf('Std %.3f\nH %.3f', avgStdVal, avgHVal);
-% end
-% condLabelsCell = cellstr(condLabels);
-% 
-% % Build legend labels for each participant (P001, P002, ...)
-% legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
+% --- Individual Participant Accuracy Comparison (Outlier Check) ---
+% Visualize each participant's effective accuracy across all std/hazard
+% conditions to help identify any outlier participants or conditions.
+
+% Extract effective accuracy for all participants and conditions
+% Rows = conditions, Columns = participants
+accMatrix = squeeze(allParams(:, :, 5)); % [nConditions x nParticipants]
+
+% Build condition labels using the actual std/hazard values (averaged
+% across participants, should be consistent within a condition)
+condLabels = strings(nConditions, 1);
+for condIdx = 1:nConditions
+    avgStdVal = nanmean(allActualVals(condIdx, :, 1));
+    avgHVal = nanmean(allActualVals(condIdx, :, 2));
+    condLabels(condIdx) = sprintf('Std %.3f\nH %.3f', avgStdVal, avgHVal);
+end
+condLabelsCell = cellstr(condLabels);
+
+% Build legend labels for each participant (P001, P002, ...)
+legendLabels = arrayfun(@(pid) sprintf('P%03d', pid), participantIDs, 'UniformOutput', false);
 
 %% --- Group Fits by Global Strategy (per condition) ---
 S = load('/Users/janebaker/Desktop/triangles/taskData/globalStrategies.mat');

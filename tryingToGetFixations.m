@@ -22,33 +22,68 @@ condHazard   = nan(numConditions, 1); % actual H value for each condIdx
 % individual local strategies have been inspected, e.g.:
 %   stratAssignment{1}(ismember(participantIDs,[1 2])) = 1;
 %   stratAssignment{1}(ismember(participantIDs,[5]))   = 2;
+
+
+% 1 = Peak at belief switch
+% 2 = Decreasing at belief switch
+% 3 = Mixed/balanced
+% NaN = No usable trace
+
+% Rows: p001-p031
+% Columns: conditions 1-6
+
+strategyMatrix = [
+    2   2   2   1   1   1;  % p001
+    2   1   1   1   2   1;  % p002
+    1   2   2   1   2   2;  % p003
+    3 NaN   3   3 NaN   3;  % p004
+    1   1   1   1   1   1;  % p005
+    1   1   1   1   1   1;  % p006
+    NaN NaN NaN NaN NaN NaN;  % p007
+    1   2   1   1   1   1;  % p008
+    2   3   1   3   3   3;  % p009
+    2   2   2   2   2   2;  % p010
+    3   2   2   2   2   2;  % p011
+    2   1   1   1   3   3;  % p012
+    NaN NaN NaN NaN NaN NaN;  % p013
+    1   1   1   3   1   3;  % p014
+    2   1   1   1   1   1;  % p015
+    3   1   3   1   3   3;  % p016
+    3   1   1   1   1   1;  % p017
+    2   1   1   3   1   1;  % p018
+    1   2   3   1   2   1;  % p019
+    3   3   3   3   3   3;  % p020
+    2   1   2   3   1   2;  % p021
+    3   1   2   1   1   1;  % p022
+    2   1   2   2   2   3;  % p023
+    2   2   2   2   2   2;  % p024
+    3   3   3   3   3   3;  % p025
+    2   1   1   3   3   2;  % p026
+    3   1   1   3 NaN   1;  % p027
+    NaN NaN NaN NaN NaN NaN;  % p028
+    2   2   1   1   3   1;  % p029
+    2   1   1   1   1   1;  % p030
+    1   2   1   1   1   1;  % p031
+    ];
+
 stratAssignment = cell(numConditions, 1);
 
-% ---------------- enter manually ----------------------
-% Condition 1
-stratAssignment{1} = [1; 1; 2; 3; 3; 3; NaN; 3; 1; 2];
+for c = 1:numConditions
+    stratAssignment{c} = strategyMatrix(:, c);
+end
 
-% Condition 2
-stratAssignment{2} = [2; 2; 2; NaN; 3; 3; NaN; 2; 3; 2];
+stratNames = {
+    'Peak at Switch'
+    'Decreasing at Switch'
+    'Mixed/Balanced'
+    };
 
-% Condition 3
-stratAssignment{3} = [2; 3; 1; 3; 3; 3; NaN; 3; 3; 2];
+stratColors = [
+    0.00 0.45 0.74;
+    0.85 0.33 0.10;
+    0.47 0.67 0.19
+    ];
 
-% Condition 4
-stratAssignment{4} = [2; 2; 2; 3; 3; 2; NaN; 2; 3; 2];
-
-% Condition 5
-stratAssignment{5} = [1; 1; 1; NaN; 3; 3; NaN; 3; 3; 2];
-
-% Condition 6
-stratAssignment{6} = [2; 3; 2; 3; 3; 3; NaN; 3; 1; 2];
-% ------------------------------------------------------
-
-% for c = 1:numConditions
-%     stratAssignment{c} = nan(numParticipants, 1);
-% end
-stratNames = {'Strategy 1', 'Strategy 2', 'Strategy 3'};
-stratColors = [0.00 0.45 0.74; 0.85 0.33 0.10; 0.47 0.67 0.19];
 
 % Define temporal window for local event-related analysis (in frames/samples)
 timeBefore = 200;
@@ -279,20 +314,20 @@ for p = 1:numParticipants
 
         % % Store for Global Analysis (Proportion of time looking at each source)
         % lookCount = 0; oppCount = 0; sameCount = 0;
-        % 
+        %
         % for f_idx = 1:length(td)
         %     if f_idx > length(nFiltered), break; end
         %     if ~isnan(nFiltered(f_idx))
         %         lookCount = lookCount + 1;
-        % 
+        %
         %         % Determine if participant selected Left ('F') or Right ('J')
         %         isLeftK = td(f_idx).keyPressed == 'F';
-        % 
+        %
         %         % Check if gaze is strongly biased to the Right (>= 0.80) or Left (<= -0.80)
         %         lookR = nFiltered(f_idx) >= 0.80;
         %         isRightK = td(f_idx).keyPressed == 'J';
         %         lookL = nFiltered(f_idx) <= -0.80;
-        % 
+        %
         %         % Tally whether they are looking at the opposite source they selected,
         %         % or the same source they selected
         %         if (isLeftK && lookR) || (isRightK && lookL), oppCount = oppCount + 1;
@@ -318,169 +353,169 @@ for c = 1:numConditions
     fprintf('Condition %d (%s): %d/%d participants valid\n', c, condLabels{c}, nValid, numParticipants);
 end
 
-% %% --- 2c. DERIVE SINGLE DATA-DRIVEN FIXATION BOUNDARY (pooled across all conditions & participants) ---
-% pooledGaze = [];
-% for c = 1:numConditions
-%     for p = 1:numParticipants
-%         if validEyeData(c, p) && ~isempty(nFilteredStorage{c, p})
-%             pooledGaze = [pooledGaze; nFilteredStorage{c, p}(:)];
-%         end
-%     end
-% end
-% 
-% [sourceBoundaryPos, sourceBoundaryNeg, boundaryFitInfo] = ...
-%     computeFixationBoundary(pooledGaze, nSDBoundary, showFixationHistograms, 'All Conditions Pooled');
-% 
-% fprintf('\n--- Empirically-Derived Source Fixation Boundary (N = %d SD, pooled across all conditions) ---\n', nSDBoundary);
-% fprintf('Boundary = +/- %.3f\n', sourceBoundaryPos);
-% 
-% %% --- 2d. COMPUTE GLOBAL PROPORTIONS USING SINGLE POOLED BOUNDARY ---
-% posThr = sourceBoundaryPos;
-% negThr = sourceBoundaryNeg;
-% 
-% for c = 1:numConditions
-%     for p = 1:numParticipants
-%         if ~validEyeData(c, p) || isempty(nFilteredStorage{c, p}), continue; end
-% 
-%         nF   = nFilteredStorage{c, p};
-%         keys = keyPressedStorage{c, p};
-% 
-%         lookCount = 0; oppCount = 0; sameCount = 0;
-%         for f_idx = 1:length(nF)
-%             if ~isnan(nF(f_idx))
-%                 lookCount = lookCount + 1;
-%                 isLeftK  = keys(f_idx) == 'F';
-%                 isRightK = keys(f_idx) == 'J';
-%                 lookR = nF(f_idx) >= posThr;
-%                 lookL = nF(f_idx) <= negThr;
-% 
-%                 if (isLeftK && lookR) || (isRightK && lookL)
-%                     oppCount = oppCount + 1;
-%                 elseif (isLeftK && lookL) || (isRightK && lookR)
-%                     sameCount = sameCount + 1;
-%                 end
-%             end
-%         end
-% 
-%         if lookCount > 0
-%             oppProportion(c, p)  = oppCount / lookCount;
-%             sameProportion(c, p) = sameCount / lookCount;
-%         end
-%     end
-% end
-% 
-% % --- Central fixation ("middle") proportion, derived from same/opposite ---
-% midProportion = nan(numConditions, numParticipants);
-% 
-% %% --- 2e. COMPUTE CENTRAL FIXATION ("MIDDLE") PROPORTION ---
-% for c = 1:numConditions
-%     for p = 1:numParticipants
-%         if validEyeData(c, p) && ~isnan(oppProportion(c, p)) && ~isnan(sameProportion(c, p))
-%             midProportion(c, p) = 1 - sameProportion(c, p) - oppProportion(c, p);
-%         end
-%     end
-% end
-% 
-% %% --- 2f. DIAGNOSTIC: POOLED CENTRAL FIXATION DISTRIBUTION ---
-% pooledMid = midProportion(:);
-% pooledMid = pooledMid(~isnan(pooledMid));
-% 
-% medianSplit  = median(pooledMid);
-% tertileSplit = quantile(pooledMid, [1/3, 2/3]);
-% 
-% figMid = figure('Units', 'inches', 'Position', [1 1 10 7], 'Color', 'w'); hold on;
-% 
-% histogram(pooledMid, 20, 'FaceColor', [0.6 0.6 0.6], 'EdgeColor', 'k');
-% 
-% yl = ylim;
-% h1 = plot([medianSplit medianSplit], yl, 'r-', 'LineWidth', 2.5);
-% h2 = plot([tertileSplit(1) tertileSplit(1)], yl, 'b--', 'LineWidth', 2.5);
-% plot([tertileSplit(2) tertileSplit(2)], yl, 'b--', 'LineWidth', 2.5);
-% 
-% set(gca, 'FontSize', 18, 'LineWidth', 1.5, 'TickDir', 'out');
-% xlabel('Central Fixation Proportion (mid)', 'FontSize', 20);
-% ylabel('Count', 'FontSize', 20);
-% legend([h1, h2], ...
-%     {sprintf('Median split (%.2f)', medianSplit), ...
-%      sprintf('Tertile splits (%.2f, %.2f)', tertileSplit(1), tertileSplit(2))}, ...
-%     'FontSize', 14, 'Location', 'best');
-% title(sprintf('Pooled Central Fixation Distribution (N=%d obs)', numel(pooledMid)), 'FontSize', 22);
-% grid on;
-% 
-% fprintf('\n--- Pooled Central Fixation (mid) Diagnostics ---\n');
-% fprintf('N = %d observations (participant x condition)\n', numel(pooledMid));
-% fprintf('Median split point: %.3f\n', medianSplit);
-% fprintf('Tertile split points: %.3f, %.3f\n', tertileSplit(1), tertileSplit(2));
-% fprintf('Min: %.3f | Max: %.3f | Mean: %.3f | SD: %.3f\n', ...
-%     min(pooledMid), max(pooledMid), mean(pooledMid), std(pooledMid));
-% 
-% %% --- 2g. CLASSIFY LOW / MODERATE / HIGH CENTRAL FIXATION STRATEGY ---
-% % Using pooled tertile cutoffs derived in Section 2f
-% lowCut  = tertileSplit(1); % 0.06
-% highCut = tertileSplit(2); % 0.15
-% 
-% % centralFixCategory(c,p) = 1 (Low), 2 (Moderate), 3 (High), or NaN (invalid)
-% centralFixCategory = nan(numConditions, numParticipants);
-% 
-% for c = 1:numConditions
-%     for p = 1:numParticipants
-%         m = midProportion(c, p);
-%         if isnan(m), continue; end
-% 
-%         if m <= lowCut
-%             centralFixCategory(c, p) = 1; % Low
-%         elseif m <= highCut
-%             centralFixCategory(c, p) = 2; % Moderate
-%         else
-%             centralFixCategory(c, p) = 3; % High
-%         end
-%     end
-% end
-% 
-% centralFixLabels = {'Low Central Fixation', 'Moderate Central Fixation', 'High Central Fixation'};
-% centralFixColors = [0.20 0.55 0.85; 0.90 0.60 0.10; 0.75 0.10 0.15];
-% 
-% fprintf('\n--- Central Fixation Category Counts (Low <= %.2f < Moderate <= %.2f < High) ---\n', lowCut, highCut);
-% for c = 1:numConditions
-%     nLow = sum(centralFixCategory(c,:) == 1);
-%     nMod = sum(centralFixCategory(c,:) == 2);
-%     nHigh = sum(centralFixCategory(c,:) == 3);
-%     fprintf('Condition %d (%s): Low=%d, Moderate=%d, High=%d\n', c, condLabels{c}, nLow, nMod, nHigh);
-% end
-% 
-% %% --- 2h. DIAGNOSTIC: WITHIN- VS BETWEEN-SUBJECT VARIANCE IN CENTRAL FIXATION ---
-% 
-% % --- (1) Heatmap of centralFixCategory: participant x condition ---
-% figHeat = figure('Units', 'inches', 'Position', [1 1 12 8], 'Color', 'w');
-% catMapDisplay = centralFixCategory'; % participants as rows, conditions as columns
-% 
-% imagesc(catMapDisplay, 'AlphaData', ~isnan(catMapDisplay));
-% set(gca, 'Color', [0.85 0.85 0.85]); % NaN cells show as gray background
-% 
-% colormap([centralFixColors]);
-% caxis([1 3]);
-% cb = colorbar('Ticks', [1 2 3], 'TickLabels', {'Low', 'Moderate', 'High'});
-% cb.FontSize = 16;
-% 
-% set(gca, 'FontSize', 16, 'XTick', 1:numConditions, 'XTickLabel', condLabels, ...
-%     'XTickLabelRotation', 20, 'YTick', 1:numParticipants, ...
-%     'YTickLabel', arrayfun(@(pid) sprintf('p%03d', pid), participantIDs, 'UniformOutput', false));
-% xlabel('Condition', 'FontSize', 20, 'FontWeight', 'bold');
-% ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
-% title('Central Fixation Category by Participant x Condition', 'FontSize', 24, 'FontWeight', 'bold');
-% 
-% %% --- 2i. EXPORT GLOBAL STRATEGY LABELS FOR ACCURACY SCRIPT ---
-% % strategyMatrix(c,p) = 1 (Low), 2 (Moderate), 3 (High) central fixation, NaN = excluded/invalid
-% % Rows = condIdx = (stdHrzIdx-1)*2 + hazardIdx ; Columns = participantIDs order
-% strategyMatrix         = centralFixCategory;
-% strategyParticipantIDs = participantIDs;
-% strategyCondLabels     = condLabels;
-% strategyNames          = centralFixLabels;
-% 
-% strategySavePath = '/Users/janebaker/Desktop/triangles/taskData/globalStrategies.mat';
-% save(strategySavePath, 'strategyMatrix', 'strategyParticipantIDs', ...
-%      'strategyCondLabels', 'strategyNames');
-% fprintf('\nSaved global strategy labels to %s\n', strategySavePath);
+%% --- 2c. DERIVE SINGLE DATA-DRIVEN FIXATION BOUNDARY (pooled across all conditions & participants) ---
+pooledGaze = [];
+for c = 1:numConditions
+    for p = 1:numParticipants
+        if validEyeData(c, p) && ~isempty(nFilteredStorage{c, p})
+            pooledGaze = [pooledGaze; nFilteredStorage{c, p}(:)];
+        end
+    end
+end
+
+[sourceBoundaryPos, sourceBoundaryNeg, boundaryFitInfo] = ...
+    computeFixationBoundary(pooledGaze, nSDBoundary, showFixationHistograms, 'All Conditions Pooled');
+
+fprintf('\n--- Empirically-Derived Source Fixation Boundary (N = %d SD, pooled across all conditions) ---\n', nSDBoundary);
+fprintf('Boundary = +/- %.3f\n', sourceBoundaryPos);
+
+%% --- 2d. COMPUTE GLOBAL PROPORTIONS USING SINGLE POOLED BOUNDARY ---
+posThr = sourceBoundaryPos;
+negThr = sourceBoundaryNeg;
+
+for c = 1:numConditions
+    for p = 1:numParticipants
+        if ~validEyeData(c, p) || isempty(nFilteredStorage{c, p}), continue; end
+
+        nF   = nFilteredStorage{c, p};
+        keys = keyPressedStorage{c, p};
+
+        lookCount = 0; oppCount = 0; sameCount = 0;
+        for f_idx = 1:length(nF)
+            if ~isnan(nF(f_idx))
+                lookCount = lookCount + 1;
+                isLeftK  = keys(f_idx) == 'F';
+                isRightK = keys(f_idx) == 'J';
+                lookR = nF(f_idx) >= posThr;
+                lookL = nF(f_idx) <= negThr;
+
+                if (isLeftK && lookR) || (isRightK && lookL)
+                    oppCount = oppCount + 1;
+                elseif (isLeftK && lookL) || (isRightK && lookR)
+                    sameCount = sameCount + 1;
+                end
+            end
+        end
+
+        if lookCount > 0
+            oppProportion(c, p)  = oppCount / lookCount;
+            sameProportion(c, p) = sameCount / lookCount;
+        end
+    end
+end
+
+% --- Central fixation ("middle") proportion, derived from same/opposite ---
+midProportion = nan(numConditions, numParticipants);
+
+%% --- 2e. COMPUTE CENTRAL FIXATION ("MIDDLE") PROPORTION ---
+for c = 1:numConditions
+    for p = 1:numParticipants
+        if validEyeData(c, p) && ~isnan(oppProportion(c, p)) && ~isnan(sameProportion(c, p))
+            midProportion(c, p) = 1 - sameProportion(c, p) - oppProportion(c, p);
+        end
+    end
+end
+
+%% --- 2f. DIAGNOSTIC: POOLED CENTRAL FIXATION DISTRIBUTION ---
+pooledMid = midProportion(:);
+pooledMid = pooledMid(~isnan(pooledMid));
+
+medianSplit  = median(pooledMid);
+tertileSplit = quantile(pooledMid, [1/3, 2/3]);
+
+figMid = figure('Units', 'inches', 'Position', [1 1 10 7], 'Color', 'w'); hold on;
+
+histogram(pooledMid, 20, 'FaceColor', [0.6 0.6 0.6], 'EdgeColor', 'k');
+
+yl = ylim;
+h1 = plot([medianSplit medianSplit], yl, 'r-', 'LineWidth', 2.5);
+h2 = plot([tertileSplit(1) tertileSplit(1)], yl, 'b--', 'LineWidth', 2.5);
+plot([tertileSplit(2) tertileSplit(2)], yl, 'b--', 'LineWidth', 2.5);
+
+set(gca, 'FontSize', 18, 'LineWidth', 1.5, 'TickDir', 'out');
+xlabel('Central Fixation Proportion (mid)', 'FontSize', 20);
+ylabel('Count', 'FontSize', 20);
+legend([h1, h2], ...
+    {sprintf('Median split (%.2f)', medianSplit), ...
+     sprintf('Tertile splits (%.2f, %.2f)', tertileSplit(1), tertileSplit(2))}, ...
+    'FontSize', 14, 'Location', 'best');
+title(sprintf('Pooled Central Fixation Distribution (N=%d obs)', numel(pooledMid)), 'FontSize', 22);
+grid on;
+
+fprintf('\n--- Pooled Central Fixation (mid) Diagnostics ---\n');
+fprintf('N = %d observations (participant x condition)\n', numel(pooledMid));
+fprintf('Median split point: %.3f\n', medianSplit);
+fprintf('Tertile split points: %.3f, %.3f\n', tertileSplit(1), tertileSplit(2));
+fprintf('Min: %.3f | Max: %.3f | Mean: %.3f | SD: %.3f\n', ...
+    min(pooledMid), max(pooledMid), mean(pooledMid), std(pooledMid));
+
+%% --- 2g. CLASSIFY LOW / MODERATE / HIGH CENTRAL FIXATION STRATEGY ---
+% Using pooled tertile cutoffs derived in Section 2f
+lowCut  = tertileSplit(1); % 0.06
+highCut = tertileSplit(2); % 0.15
+
+% centralFixCategory(c,p) = 1 (Low), 2 (Moderate), 3 (High), or NaN (invalid)
+centralFixCategory = nan(numConditions, numParticipants);
+
+for c = 1:numConditions
+    for p = 1:numParticipants
+        m = midProportion(c, p);
+        if isnan(m), continue; end
+
+        if m <= lowCut
+            centralFixCategory(c, p) = 1; % Low
+        elseif m <= highCut
+            centralFixCategory(c, p) = 2; % Moderate
+        else
+            centralFixCategory(c, p) = 3; % High
+        end
+    end
+end
+
+centralFixLabels = {'Low Central Fixation', 'Moderate Central Fixation', 'High Central Fixation'};
+centralFixColors = [0.20 0.55 0.85; 0.90 0.60 0.10; 0.75 0.10 0.15];
+
+fprintf('\n--- Central Fixation Category Counts (Low <= %.2f < Moderate <= %.2f < High) ---\n', lowCut, highCut);
+for c = 1:numConditions
+    nLow = sum(centralFixCategory(c,:) == 1);
+    nMod = sum(centralFixCategory(c,:) == 2);
+    nHigh = sum(centralFixCategory(c,:) == 3);
+    fprintf('Condition %d (%s): Low=%d, Moderate=%d, High=%d\n', c, condLabels{c}, nLow, nMod, nHigh);
+end
+
+%% --- 2h. DIAGNOSTIC: WITHIN- VS BETWEEN-SUBJECT VARIANCE IN CENTRAL FIXATION ---
+
+% --- (1) Heatmap of centralFixCategory: participant x condition ---
+figHeat = figure('Units', 'inches', 'Position', [1 1 12 8], 'Color', 'w');
+catMapDisplay = centralFixCategory'; % participants as rows, conditions as columns
+
+imagesc(catMapDisplay, 'AlphaData', ~isnan(catMapDisplay));
+set(gca, 'Color', [0.85 0.85 0.85]); % NaN cells show as gray background
+
+colormap([centralFixColors]);
+caxis([1 3]);
+cb = colorbar('Ticks', [1 2 3], 'TickLabels', {'Low', 'Moderate', 'High'});
+cb.FontSize = 16;
+
+set(gca, 'FontSize', 16, 'XTick', 1:numConditions, 'XTickLabel', condLabels, ...
+    'XTickLabelRotation', 20, 'YTick', 1:numParticipants, ...
+    'YTickLabel', arrayfun(@(pid) sprintf('p%03d', pid), participantIDs, 'UniformOutput', false));
+xlabel('Condition', 'FontSize', 20, 'FontWeight', 'bold');
+ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
+title('Central Fixation Category by Participant x Condition', 'FontSize', 24, 'FontWeight', 'bold');
+
+%% --- 2i. EXPORT GLOBAL STRATEGY LABELS FOR ACCURACY SCRIPT ---
+% strategyMatrix(c,p) = 1 (Low), 2 (Moderate), 3 (High) central fixation, NaN = excluded/invalid
+% Rows = condIdx = (stdHrzIdx-1)*2 + hazardIdx ; Columns = participantIDs order
+strategyMatrix         = centralFixCategory;
+strategyParticipantIDs = participantIDs;
+strategyCondLabels     = condLabels;
+strategyNames          = centralFixLabels;
+
+strategySavePath = '/Users/janebaker/Desktop/triangles/taskData/globalStrategies.mat';
+save(strategySavePath, 'strategyMatrix', 'strategyParticipantIDs', ...
+     'strategyCondLabels', 'strategyNames');
+fprintf('\nSaved global strategy labels to %s\n', strategySavePath);
 
 %% --- 3. LOCAL STRATEGIES PLOT (GROUPED BY STRATEGY) ---
 % % *** COMMENTED OUT: strategy assignments (stratAssignment) are currently
@@ -496,7 +531,7 @@ end
 % 
 %     yline(0.5, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2, 'HandleVisibility', 'off');
 % 
-%     for s = 1:3
+%     for s = 1:numel(stratNames)
 %         % Determine which participants belong to this strategy AND have
 %         % valid eye data for this condition
 %         inStrat = (stratAssignment{c} == s) & validEyeData(c, :)';
@@ -512,7 +547,8 @@ end
 %             if isempty(thisData), continue; end
 %             dataMat = [dataMat; mean(thisData, 1, 'omitnan')];
 %         end
-%         if isempty(dataMat), continue; end
+% if isempty(dataMat), continue; end
+% nStrat = size(dataMat, 1);
 % 
 %         % --- TRANSFORMATION ---
 %         dataMat = 1 - (dataMat / 2);
@@ -546,76 +582,76 @@ end
 % end
 
 %% --- 4. GLOBAL STRATEGIES PLOT (Annotated participants, per condition) ---
-% % Excludes participants who did not have enough valid eye data for that
-% % condition/block (their oppProportion/sameProportion are NaN).
-% participantColors = lines(numParticipants);
-% 
-% % --- Output coordinates (same, opposite, middle) per participant x condition ---
-% % coordTable{p, c} = [sameProp, oppProp, midProp], each rounded to 2 decimals
-% coordTable = cell(numParticipants, numConditions);
-% for p = 1:numParticipants
-%     for c = 1:numConditions
-%         if ~validEyeData(c, p) || isnan(oppProportion(c, p)) || isnan(sameProportion(c, p))
-%             coordTable{p, c} = [NaN, NaN, NaN];
-%         else
-%             xVal   = round(sameProportion(c, p), 2);
-%             yVal   = round(oppProportion(c, p), 2);
-%             midVal = round(1 - sameProportion(c, p) - oppProportion(c, p), 2);
-%             coordTable{p, c} = [xVal, yVal, midVal];
-%         end
-%     end
-% end
-% 
-% % Build a human-readable string version: "(same, opposite, middle)"
-% coordStrTable = cell(numParticipants, numConditions);
-% for p = 1:numParticipants
-%     for c = 1:numConditions
-%         v = coordTable{p, c};
-%         if any(isnan(v))
-%             coordStrTable{p, c} = 'NA';
-%         else
-%             coordStrTable{p, c} = sprintf('(%.2f, %.2f, %.2f)', v(1), v(2), v(3));
-%         end
-%     end
-% end
-% 
-% % Display as a table with participant IDs as rows, conditions as columns
-% rowNames = arrayfun(@(pid) sprintf('p%03d', pid), participantIDs, 'UniformOutput', false);
-% colNames = matlab.lang.makeValidName(condLabels);
-% coordDisplay = cell2table(coordStrTable, 'RowNames', rowNames, 'VariableNames', colNames);
-% 
-% fprintf('\n--- Participant x Condition Coordinates (Same, Opposite, Middle) ---\n');
-% disp(coordDisplay);
-% 
-% for c = 1:numConditions
-%     figG = figure('Units', 'inches', 'Position', [1, 1, 14, 12], 'Color', 'w'); hold on;
-% 
-%     plot([0 1], [0 1], '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2.5, 'HandleVisibility', 'off');
-% 
-%     for p = 1:numParticipants
-%         if ~validEyeData(c, p) || isnan(oppProportion(c, p)) || isnan(sameProportion(c, p))
-%             continue; % exclude participants without enough valid eye data
-%         end
-% 
-%         xVal = sameProportion(c, p); yVal = oppProportion(c, p); midVal = 1 - xVal - yVal;
-% 
-%         plot(xVal, yVal, 'o', 'MarkerSize', 18, 'MarkerFaceColor', participantColors(p,:), 'MarkerEdgeColor', 'k', 'LineWidth', 2);
-% 
-%         %%%%% remove annotations since theres a bunch of people now :p
-%         % labelStr = sprintf(' P%03d (mid: %.2f)', participantIDs(p), midVal);
-%         % text(xVal + 0.015, yVal, labelStr, 'FontSize', 24, 'FontWeight', 'bold', 'Color', participantColors(p,:) * 0.7);
-%     end
-% 
-%     set(gca, 'FontSize', 28, 'LineWidth', 3, 'TickDir', 'out', 'Box', 'on');
-%     xlabel('Fixation Proportion: Same Source', 'FontSize', 36, 'FontWeight', 'bold');
-%     ylabel('Fixation Proportion: Opposite Source', 'FontSize', 36, 'FontWeight', 'bold');
-%     title([condLabels{c} ': Global Viewing Strategy'], 'FontSize', 44, 'FontWeight', 'bold');
-%     xlim([0 1]); ylim([0 1]); grid on;
-% 
-%     % saveas(figG, fullfile(figurePath, [strrep(condLabels{c}, ' ', '') '_Global_Strategy_Scatter.png']));
-% end
-% 
-% %% --- 4b. GLOBAL STRATEGIES BAR CHART (Per-Participant: Same/Opposite/Middle across Conditions) ---
+% Excludes participants who did not have enough valid eye data for that
+% condition/block (their oppProportion/sameProportion are NaN).
+participantColors = lines(numParticipants);
+
+% --- Output coordinates (same, opposite, middle) per participant x condition ---
+% coordTable{p, c} = [sameProp, oppProp, midProp], each rounded to 2 decimals
+coordTable = cell(numParticipants, numConditions);
+for p = 1:numParticipants
+    for c = 1:numConditions
+        if ~validEyeData(c, p) || isnan(oppProportion(c, p)) || isnan(sameProportion(c, p))
+            coordTable{p, c} = [NaN, NaN, NaN];
+        else
+            xVal   = round(sameProportion(c, p), 2);
+            yVal   = round(oppProportion(c, p), 2);
+            midVal = round(1 - sameProportion(c, p) - oppProportion(c, p), 2);
+            coordTable{p, c} = [xVal, yVal, midVal];
+        end
+    end
+end
+
+% Build a human-readable string version: "(same, opposite, middle)"
+coordStrTable = cell(numParticipants, numConditions);
+for p = 1:numParticipants
+    for c = 1:numConditions
+        v = coordTable{p, c};
+        if any(isnan(v))
+            coordStrTable{p, c} = 'NA';
+        else
+            coordStrTable{p, c} = sprintf('(%.2f, %.2f, %.2f)', v(1), v(2), v(3));
+        end
+    end
+end
+
+% Display as a table with participant IDs as rows, conditions as columns
+rowNames = arrayfun(@(pid) sprintf('p%03d', pid), participantIDs, 'UniformOutput', false);
+colNames = matlab.lang.makeValidName(condLabels);
+coordDisplay = cell2table(coordStrTable, 'RowNames', rowNames, 'VariableNames', colNames);
+
+fprintf('\n--- Participant x Condition Coordinates (Same, Opposite, Middle) ---\n');
+disp(coordDisplay);
+
+for c = 1:numConditions
+    figG = figure('Units', 'inches', 'Position', [1, 1, 14, 12], 'Color', 'w'); hold on;
+
+    plot([0 1], [0 1], '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2.5, 'HandleVisibility', 'off');
+
+    for p = 1:numParticipants
+        if ~validEyeData(c, p) || isnan(oppProportion(c, p)) || isnan(sameProportion(c, p))
+            continue; % exclude participants without enough valid eye data
+        end
+
+        xVal = sameProportion(c, p); yVal = oppProportion(c, p); midVal = 1 - xVal - yVal;
+
+        plot(xVal, yVal, 'o', 'MarkerSize', 18, 'MarkerFaceColor', participantColors(p,:), 'MarkerEdgeColor', 'k', 'LineWidth', 2);
+
+        %%%%% remove annotations since theres a bunch of people now :p
+        % labelStr = sprintf(' P%03d (mid: %.2f)', participantIDs(p), midVal);
+        % text(xVal + 0.015, yVal, labelStr, 'FontSize', 24, 'FontWeight', 'bold', 'Color', participantColors(p,:) * 0.7);
+    end
+
+    set(gca, 'FontSize', 28, 'LineWidth', 3, 'TickDir', 'out', 'Box', 'on');
+    xlabel('Fixation Proportion: Same Source', 'FontSize', 36, 'FontWeight', 'bold');
+    ylabel('Fixation Proportion: Opposite Source', 'FontSize', 36, 'FontWeight', 'bold');
+    title([condLabels{c} ': Global Viewing Strategy'], 'FontSize', 44, 'FontWeight', 'bold');
+    xlim([0 1]); ylim([0 1]); grid on;
+
+    % saveas(figG, fullfile(figurePath, [strrep(condLabels{c}, ' ', '') '_Global_Strategy_Scatter.png']));
+end
+
+%% --- 4b. GLOBAL STRATEGIES BAR CHART (Per-Participant: Same/Opposite/Middle across Conditions) ---
 % % One figure per participant. X-axis = condition, with 3 grouped bars per
 % % condition representing Same / Opposite / Middle fixation proportions.
 % for p = 1:numParticipants
@@ -652,8 +688,8 @@ end
 % 
 %     % saveas(figB, fullfile(figurePath, sprintf('p%03d_Global_Strategy_Bar.png', pid)));
 % end
-% 
-% %% --- 4c. GLOBAL STRATEGIES BAR CHART (Group Average Across Participants, per Condition) ---
+
+%% --- 4c. GLOBAL STRATEGIES BAR CHART (Group Average Across Participants, per Condition) ---
 % % One figure. X-axis = condition, with 3 grouped bars per condition
 % % representing the AVERAGE Same / Opposite / Middle fixation proportions
 % % across all valid participants, with SEM error bars.
@@ -708,56 +744,144 @@ end
 % % saveas(figAvg, fullfile(figurePath, 'GroupAvg_Global_Strategy_Bar.png'));
 
 %% --- 5. LOCAL STRATEGIES PLOT (INDIVIDUAL PARTICIPANTS) ---
-% *** COMMENTED OUT per request. Uncomment to inspect each participant's
-% local (event-related) gaze behavior across all 6 conditions. ***
+% % *** COMMENTED OUT per request. Uncomment to inspect each participant's
+% % local (event-related) gaze behavior across all 6 conditions. ***
+% 
+% condColors = lines(numConditions);
+% 
+% for p = 1:numParticipants
+%     pid = participantIDs(p);
+% 
+%     figI = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
+%     legH = [];
+%     legNames = {};
+% 
+%     yline(0.5, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2, 'HandleVisibility', 'off');
+% 
+%     for c = 1:numConditions
+%         if ~validEyeData(c, p), continue; end
+% 
+%         dataMat = indivDataStorage{c, p};
+%         if isempty(dataMat), continue; end
+% 
+%         % --- TRANSFORMATION ---
+%         dataMat = 1 - (dataMat / 2);
+%         avg = mean(dataMat, 1, 'omitnan');
+%         timeAxis =  ((1:length(avg)) - (timeBefore + 1)) * 0.05;
+% 
+%         if size(dataMat, 1) > 1
+%             sem = std(dataMat, 0, 1, 'omitnan') ./ sqrt(size(dataMat, 1));
+%             fill([timeAxis, fliplr(timeAxis)], [avg+sem, fliplr(avg-sem)], ...
+%                 condColors(c,:), 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+%         end
+% 
+%         h = plot(timeAxis, avg, 'Color', condColors(c,:), 'LineWidth', 4);
+%         legH = [legH, h];
+%         legNames{end+1} = condLabels{c};
+%     end
+% 
+%     set(gca, 'FontSize', 28, 'LineWidth', 3, 'TickDir', 'out');
+%     xlabel('Time (Seconds)', 'FontSize', 36, 'FontWeight', 'bold');
+%     ylabel('Gaze Position', 'FontSize', 36, 'FontWeight', 'bold');
+%     ylim([0 1]);
+%     yticks([0, 0.5, 1]);
+%     yticklabels({'Old Belief Source', 'Center', 'New Belief Source'});
+% 
+%     title(sprintf('Local Gaze Shifts: Participant p%03d', pid), 'FontSize', 44, 'FontWeight', 'bold');
+% 
+%     if ~isempty(legH)
+%         legend(legH, legNames, 'FontSize', 22, 'Location', 'best');
+%     end
+% 
+%     xlim([-10 10]); grid on;
+% 
+%     saveas(figI, fullfile(figurePath, sprintf('IndLocStrat_p%03d.png', pid)));
+% end
 
-condColors = lines(numConditions);
+%% --- 6. PLOT RAW DATA (FIXATIONS, TARGET, BELIEF, SOURCE) ---
+plotPIDs = 25;  % Change to specific participants if desired
 
 for p = 1:numParticipants
     pid = participantIDs(p);
+    if ~ismember(pid, plotPIDs), continue; end
 
-    figI = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
-    legH = [];
-    legNames = {};
+    pidStr = sprintf('p%03d', pid);
 
-    yline(0.5, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 2, 'HandleVisibility', 'off');
+    % Reload task data for plotting
+    taskFile = load(fullfile(dataDir, [pidStr '.mat']));
+    taskData = taskFile.data;
 
-    for c = 1:numConditions
-        if ~validEyeData(c, p), continue; end
+    for blockNumber = 2:7
+        td = taskData([taskData.blockNumber] == blockNumber);
+        if isempty(td), continue; end
 
-        dataMat = indivDataStorage{c, p};
-        if isempty(dataMat), continue; end
+        % Determine condition
+        stdHrzIdx = td(1).stdHrzIdx;
+        hazardIdx = td(1).hazardIdx;
+        condIdx = (stdHrzIdx - 1) * 2 + hazardIdx;
 
-        % --- TRANSFORMATION ---
-        dataMat = 1 - (dataMat / 2);
-        avg = mean(dataMat, 1, 'omitnan');
-        timeAxis = ((1:length(avg)) - (timeBefore + 1)) * (dsFactor / 1000);
-
-        if size(dataMat, 1) > 1
-            sem = std(dataMat, 0, 1, 'omitnan') ./ sqrt(size(dataMat, 1));
-            fill([timeAxis, fliplr(timeAxis)], [avg+sem, fliplr(avg-sem)], ...
-                condColors(c,:), 'FaceAlpha', 0.15, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+        % Skip conditions without valid eye data
+        if ~validEyeData(condIdx, p) || isempty(nFilteredStorage{condIdx, p})
+            continue;
         end
 
-        h = plot(timeAxis, avg, 'Color', condColors(c,:), 'LineWidth', 4);
-        legH = [legH, h];
-        legNames{end+1} = condLabels{c};
+        % Extract data
+        fixX = nFilteredStorage{condIdx, p}(:)';
+        normX = [td.targetX];
+        thisBlockIsLeft = [td.sourceIsLeft];
+        thisBlockBelief = [td.keyPressed];
+
+        nFrames = length(td);
+
+        % Normalize target and fixation positions (z-scores)
+        nxz = (normX - mean(normX, 'omitnan')) / std(normX, 'omitnan');
+        normFixX = (fixX - mean(fixX, 'omitnan')) / std(fixX, 'omitnan');
+
+        % Map source and belief to vertical plot positions
+        yl = [-3 3];
+
+        sourceVal = zeros(1, nFrames);
+        beliefVal = nan(1, nFrames);
+
+        for t = 1:nFrames
+            if thisBlockIsLeft(t)
+                sourceVal(t) = yl(1) + 0.5;
+            else
+                sourceVal(t) = yl(2) - 0.5;
+            end
+
+            if thisBlockBelief(t) == 'F'
+                beliefVal(t) = yl(1) + 0.7;
+            elseif thisBlockBelief(t) == 'J'
+                beliefVal(t) = yl(2) - 0.7;
+            end
+        end
+
+        % --- PLOTTING ---
+        figure;
+
+        lb = [0.6 0.8 1];
+
+        h1 = plot(1:nFrames, nxz, 'LineWidth', 0.1, 'Color', lb);
+        hold on
+
+        yline(0, '--', 'Color', 'k', 'LineWidth', 1);
+
+        h3 = plot(1:nFrames, sourceVal, 'o', 'MarkerSize', 3);
+        h4 = plot(1:nFrames, beliefVal, 'o', 'MarkerSize', 3);
+        h6 = plot(1:nFrames, normFixX, 'LineWidth', 3, 'Color', 'b');
+
+        xlabel('Frame');
+        ylabel('Normalized Horizontal Position (- Left, + Right)');
+
+        title(sprintf('Participant %d - %s', pid, condLabels{condIdx}));
+
+        ylim(yl);
+        xlim([1 nFrames]);
+
+        legend([h1 h3 h4 h6], ...
+            {'Target Position', 'True Source', ...
+            'Participant Belief', 'Gaze Fixation'}, ...
+            'Location', 'best');
     end
-
-    set(gca, 'FontSize', 28, 'LineWidth', 3, 'TickDir', 'out');
-    xlabel('Time (Seconds)', 'FontSize', 36, 'FontWeight', 'bold');
-    ylabel('Gaze Position', 'FontSize', 36, 'FontWeight', 'bold');
-    ylim([0 1]);
-    yticks([0, 0.5, 1]);
-    yticklabels({'Old Belief Source', 'Center', 'New Belief Source'});
-
-    title(sprintf('Local Gaze Shifts: Participant p%03d', pid), 'FontSize', 44, 'FontWeight', 'bold');
-
-    if ~isempty(legH)
-        legend(legH, legNames, 'FontSize', 22, 'Location', 'best');
-    end
-
-    xlim([-10 10]); grid on;
-
-    saveas(figI, fullfile(figurePath, sprintf('IndLocStrat_p%03d.png', pid)));
 end

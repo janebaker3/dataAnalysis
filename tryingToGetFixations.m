@@ -7,13 +7,14 @@ validTests = {
     'Global Strats Bar'         % bar graph of how the same vs opposite fixation proportions differ by condition
     'Global Strats Individual'  % bar graph of same vs opposite fixation proportions for individual participants
     'Central Fixation'          % heatmap grouping participants into central fixation categories
-    'Opposite Fixation'         % compares average opposite fixation proportion across conditions
+    'Opposite Fixation'         % heatmap grouping participants into opposite fixation categories
+    'Opposite Fixation Means'   % compares average opposite fixation proportion across conditions
     'Local Strats Individual'   % plots individual fixations surrounding a belief switch
     'Grouped Local Strats'      % plots manually categorized local strategies
     };
 
 % Select any combination of tests
-testsToRun = {'Central Fixation', 'Global Strats Scatter'};
+testsToRun = {'Opposite Fixation', 'Central Fixation'};
 
 % Check for invalid test names
 unknownTests = setdiff(testsToRun, validTests);
@@ -28,7 +29,7 @@ runLocal = any(ismember(testsToRun, ...
 runGlobal = any(ismember(testsToRun, ...
     {'Global Strats Scatter', 'Global Strats Bar', ...
     'Global Strats Individual', 'Central Fixation', ...
-    'Opposite Fixation'}));
+    'Opposite Fixation', 'Opposite Fixation Means'}));
 
 if isempty(testsToRun)
     disp('No tests selected.');
@@ -815,14 +816,117 @@ if ismember('Central Fixation', testsToRun)
     strategyCondLabels     = condLabels;
     strategyNames          = centralFixLabels;
 
-    strategySavePath = '/Users/janebaker/Desktop/triangles/taskData/globalStrategies.mat';
+    strategySavePath = '/Users/janebaker/Desktop/triangles/taskData/centralFixationStrategies.mat';
     save(strategySavePath, 'strategyMatrix', 'strategyParticipantIDs', ...
         'strategyCondLabels', 'strategyNames');
     fprintf('\nSaved global strategy labels to %s\n', strategySavePath);
 end
 
-%% --- MEAN OPPOSITE-SOURCE FIXATION ACROSS CONDITIONS ---
+%% --- DIAGNOSTIC: POOLED OPPOSITE FIXATION DISTRIBUTION ---
 if ismember('Opposite Fixation', testsToRun)
+    pooledOpp = oppProportion(:);
+    pooledOpp = pooledOpp(~isnan(pooledOpp));
+
+    medianSplit  = median(pooledOpp);
+    tertileSplit = quantile(pooledOpp, [1/3, 2/3]);
+
+    figOpp = figure('Units', 'inches', 'Position', [1 1 10 7], 'Color', 'w'); hold on;
+
+    histogram(pooledOpp, 20, 'FaceColor', [0.6 0.6 0.6], 'EdgeColor', 'k');
+
+    yl = ylim;
+    h1 = plot([medianSplit medianSplit], yl, 'r-', 'LineWidth', 2.5);
+    h2 = plot([tertileSplit(1) tertileSplit(1)], yl, 'b--', 'LineWidth', 2.5);
+    plot([tertileSplit(2) tertileSplit(2)], yl, 'b--', 'LineWidth', 2.5);
+
+    set(gca, 'FontSize', 18, 'LineWidth', 1.5, 'TickDir', 'out');
+    xlabel('Opposite Fixation Proportion', 'FontSize', 20);
+    ylabel('Count', 'FontSize', 20);
+    legend([h1, h2], ...
+        {sprintf('Median split (%.2f)', medianSplit), ...
+        sprintf('Tertile splits (%.2f, %.2f)', tertileSplit(1), tertileSplit(2))}, ...
+        'FontSize', 14, 'Location', 'best');
+    title(sprintf('Pooled Opposite Fixation Distribution (N=%d obs)', numel(pooledOpp)), 'FontSize', 22);
+    grid on;
+
+    fprintf('\n--- Pooled Opposite Fixation Diagnostics ---\n');
+    fprintf('N = %d observations (participant x condition)\n', numel(pooledOpp));
+    fprintf('Median split point: %.3f\n', medianSplit);
+    fprintf('Tertile split points: %.3f, %.3f\n', tertileSplit(1), tertileSplit(2));
+    fprintf('Min: %.3f | Max: %.3f | Mean: %.3f | SD: %.3f\n', ...
+        min(pooledOpp), max(pooledOpp), mean(pooledOpp), std(pooledOpp));
+
+    %% --- CLASSIFY LOW / MODERATE / HIGH OPPOSITE FIXATION STRATEGY ---
+    % Using pooled tertile cutoffs
+    lowCut  = tertileSplit(1);
+    highCut = tertileSplit(2);
+
+    % oppositeFixCategory(c,p) = 1 (Low), 2 (Moderate), 3 (High), or NaN (invalid)
+    oppositeFixCategory = nan(numConditions, numParticipants);
+
+    for c = 1:numConditions
+        for p = 1:numParticipants
+            m = oppProportion(c, p);
+            if isnan(m), continue; end
+
+            if m <= lowCut
+                oppositeFixCategory(c, p) = 1; % Low
+            elseif m <= highCut
+                oppositeFixCategory(c, p) = 2; % Moderate
+            else
+                oppositeFixCategory(c, p) = 3; % High
+            end
+        end
+    end
+
+    oppositeFixLabels = {'Low Opposite Fixation', 'Moderate Opposite Fixation', 'High Opposite Fixation'};
+    oppositeFixColors = [0.20 0.55 0.85; 0.90 0.60 0.10; 0.75 0.10 0.15];
+
+    fprintf('\n--- Opposite Fixation Category Counts (Low <= %.2f < Moderate <= %.2f < High) ---\n', lowCut, highCut);
+    for c = 1:numConditions
+        nLow = sum(oppositeFixCategory(c,:) == 1);
+        nMod = sum(oppositeFixCategory(c,:) == 2);
+        nHigh = sum(oppositeFixCategory(c,:) == 3);
+        fprintf('Condition %d (%s): Low=%d, Moderate=%d, High=%d\n', c, condLabels{c}, nLow, nMod, nHigh);
+    end
+
+    %% --- DIAGNOSTIC: WITHIN- VS BETWEEN-SUBJECT VARIANCE IN OPPOSITE FIXATION ---
+
+    % --- (1) Heatmap of oppositeFixCategory: participant x condition ---
+    figHeat = figure('Units', 'inches', 'Position', [1 1 12 8], 'Color', 'w');
+    catMapDisplay = oppositeFixCategory'; % participants as rows, conditions as columns
+
+    imagesc(catMapDisplay, 'AlphaData', ~isnan(catMapDisplay));
+    set(gca, 'Color', [0.85 0.85 0.85]); % NaN cells show as gray background
+
+    colormap([oppositeFixColors]);
+    caxis([1 3]);
+    cb = colorbar('Ticks', [1 2 3], 'TickLabels', {'Low', 'Moderate', 'High'});
+    cb.FontSize = 16;
+
+    set(gca, 'FontSize', 16, 'XTick', 1:numConditions, 'XTickLabel', condLabels, ...
+        'XTickLabelRotation', 20, 'YTick', 1:numParticipants, ...
+        'YTickLabel', arrayfun(@(pid) sprintf('p%03d', pid), participantIDs, 'UniformOutput', false));
+    xlabel('Condition', 'FontSize', 20, 'FontWeight', 'bold');
+    ylabel('Participant', 'FontSize', 20, 'FontWeight', 'bold');
+    title('Opposite Fixation Category by Participant x Condition', 'FontSize', 24, 'FontWeight', 'bold');
+
+    %% --- EXPORT OPPOSITE FIXATION STRATEGY LABELS FOR ACCURACY SCRIPT ---
+    % strategyMatrix(c,p) = 1 (Low), 2 (Moderate), 3 (High) opposite fixation, NaN = excluded/invalid
+    % Rows = condIdx = (stdHrzIdx-1)*2 + hazardIdx ; Columns = participantIDs order
+    strategyMatrix         = oppositeFixCategory;
+    strategyParticipantIDs = participantIDs;
+    strategyCondLabels     = condLabels;
+    strategyNames          = oppositeFixLabels;
+
+    strategySavePath = '/Users/janebaker/Desktop/triangles/taskData/oppositeFixationStrategies.mat';
+    save(strategySavePath, 'strategyMatrix', 'strategyParticipantIDs', ...
+        'strategyCondLabels', 'strategyNames');
+    fprintf('\nSaved opposite fixation strategy labels to %s\n', strategySavePath);
+end
+
+%% --- MEAN OPPOSITE-SOURCE FIXATION ACROSS CONDITIONS ---
+if ismember('Opposite Fixation Means', testsToRun)
     % Mean and SEM across valid participants
     meanOpp = mean(oppProportion, 2, 'omitnan');
     nOpp = sum(~isnan(oppProportion), 2);

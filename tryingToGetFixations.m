@@ -14,7 +14,7 @@ validTests = {
     };
 
 % Select any combination of tests
-testsToRun = {'Opposite Fixation', 'Central Fixation'};
+testsToRun = {'Raw Data', 'Global Strats Scatter', 'Opposite Fixation Means'};
 
 % Check for invalid test names
 unknownTests = setdiff(testsToRun, validTests);
@@ -38,7 +38,7 @@ end
 
 %% --- 1. INITIALIZATION & CONDITION / STRATEGY MAPPING ---
 % Define participant pool (p001 - p010)
-participantIDs = 1:31;%1:10;
+participantIDs = 1:34;
 numParticipants = length(participantIDs);
 
 % --- Condition mapping ---
@@ -67,59 +67,6 @@ condHazard   = nan(numConditions, 1); % actual H value for each condIdx
 
 % Rows: p001-p031
 % Columns: conditions 1-6
-
-localStrategyMatrix = [
-    2   2   2   1   1   1;  % p001
-    2   1   1   1   2   1;  % p002
-    1   2   2   1   2   2;  % p003
-    3 NaN   3   3 NaN   3;  % p004
-    1   1   1   1   1   1;  % p005
-    1   1   1   1   1   1;  % p006
-    NaN NaN NaN NaN NaN NaN;  % p007
-    1   2   1   1   1   1;  % p008
-    2   3   1   3   3   3;  % p009
-    2   2   2   2   2   2;  % p010
-    3   2   2   2   2   2;  % p011
-    2   1   1   1   3   3;  % p012
-    NaN NaN NaN NaN NaN NaN;  % p013
-    1   1   1   3   1   3;  % p014
-    2   1   1   1   1   1;  % p015
-    3   1   3   1   3   3;  % p016
-    3   1   1   1   1   1;  % p017
-    2   1   1   3   1   1;  % p018
-    1   2   3   1   2   1;  % p019
-    3   3   3   3   3   3;  % p020
-    2   1   2   3   1   2;  % p021
-    3   1   2   1   1   1;  % p022
-    2   1   2   2   2   3;  % p023
-    2   2   2   2   2   2;  % p024
-    3   3   3   3   3   3;  % p025
-    2   1   1   3   3   2;  % p026
-    3   1   1   3 NaN   1;  % p027
-    NaN NaN NaN NaN NaN NaN;  % p028
-    2   2   1   1   3   1;  % p029
-    2   1   1   1   1   1;  % p030
-    1   2   1   1   1   1;  % p031
-    ];
-
-stratAssignment = cell(numConditions, 1);
-
-for c = 1:numConditions
-    stratAssignment{c} = localStrategyMatrix(participantIDs, c);
-end
-
-stratNames = {
-    'Peak at Switch'
-    'Decreasing at Switch'
-    'Mixed/Balanced'
-    };
-
-stratColors = [
-    0.00 0.45 0.74;
-    0.85 0.33 0.10;
-    0.47 0.67 0.19
-    ];
-
 
 % Define temporal window for local event-related analysis (in frames/samples)
 timeBefore = 200;
@@ -400,7 +347,8 @@ end
 
 %% --- PLOT RAW DATA (FIXATIONS, TARGET, BELIEF, SOURCE) ---
 if ismember('Raw Data', testsToRun)
-    plotPIDs = 25;  % Change to specific participants
+    plotPIDs = [11, 32];  % Change to specific participants
+    % only care about p11 c1 and p32 c3
 
     for p = 1:numParticipants
         pid = participantIDs(p);
@@ -611,7 +559,7 @@ if ismember('Global Strats Scatter', testsToRun)
         title([condLabels{c} ': Global Viewing Strategy'], 'FontSize', 44, 'FontWeight', 'bold');
         xlim([0 1]); ylim([0 1]); grid on;
 
-        % saveas(figG, fullfile(figurePath, [strrep(condLabels{c}, ' ', '') '_Global_Strategy_Scatter.png']));
+        saveas(figG, fullfile(figurePath, sprintf('SFN_GLOBAL_%.3g_%.3g.png', condStdHrz(c), condHazard(c))));
     end
 end
 
@@ -1030,6 +978,8 @@ if ismember('Opposite Fixation Means', testsToRun)
         fprintf('Condition %d vs %d: p = %.6f\n', ...
             sigPairs(k,1), sigPairs(k,2), sigP(k));
     end
+
+    saveas(figOpp, fullfile(figurePath, 'SFN_Opp_Fix_Means.png'));
 end
 
 %% --- LOCAL STRATEGIES PLOT (INDIVIDUAL PARTICIPANTS) ---
@@ -1082,12 +1032,64 @@ if ismember('Local Strats Individual', testsToRun)
 
         xlim([-10 10]); grid on;
 
-        saveas(figI, fullfile(figurePath, sprintf('IndLocStrat_p%03d.png', pid)));
+        % saveas(figI, fullfile(figurePath, sprintf('IndLocStrat_p%03d.png', pid)));
     end
 end
 
 %% --- LOCAL STRATEGIES PLOT (GROUPED BY STRATEGY) ---
 if ismember('Grouped Local Strats', testsToRun)
+    localStrategyMatrix = [
+        2   2   2   1   1   1;  % p001
+        2   1   1   1   2   1;  % p002
+        1   2   2   1   2   2;  % p003
+        3 NaN   3   3 NaN   3;  % p004
+        1   1   1   1   1   1;  % p005
+        1   1   1   1   1   1;  % p006
+        NaN NaN NaN NaN NaN NaN;  % p007
+        1   2   1   1   1   1;  % p008
+        2   3   1   3   3   3;  % p009
+        2   2   2   2   2   2;  % p010
+        3   2   2   2   2   2;  % p011
+        2   1   1   1   3   3;  % p012
+        NaN NaN NaN NaN NaN NaN;  % p013
+        1   1   1   3   1   3;  % p014
+        2   1   1   1   1   1;  % p015
+        3   1   3   1   3   3;  % p016
+        3   1   1   1   1   1;  % p017
+        2   1   1   3   1   1;  % p018
+        1   2   3   1   2   1;  % p019
+        3   3   3   3   3   3;  % p020
+        2   1   2   3   1   2;  % p021
+        3   1   2   1   1   1;  % p022
+        2   1   2   2   2   3;  % p023
+        2   2   2   2   2   2;  % p024
+        3   3   3   3   3   3;  % p025
+        2   1   1   3   3   2;  % p026
+        3   1   1   3 NaN   1;  % p027
+        NaN NaN NaN NaN NaN NaN;  % p028
+        2   2   1   1   3   1;  % p029
+        2   1   1   1   1   1;  % p030
+        1   2   1   1   1   1;  % p031
+        ];
+
+    stratAssignment = cell(numConditions, 1);
+
+    for c = 1:numConditions
+        stratAssignment{c} = localStrategyMatrix(participantIDs, c);
+    end
+
+    stratNames = {
+        'Peak at Switch'
+        'Decreasing at Switch'
+        'Mixed/Balanced'
+        };
+
+    stratColors = [
+        0.00 0.45 0.74;
+        0.85 0.33 0.10;
+        0.47 0.67 0.19
+        ];
+
     for c = 1:numConditions
         figL = figure('Units', 'inches', 'Position', [1, 1, 14, 10], 'Color', 'w'); hold on;
         legH = [];
